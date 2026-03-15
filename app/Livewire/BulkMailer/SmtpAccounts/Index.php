@@ -4,14 +4,16 @@ namespace App\Livewire\BulkMailer\SmtpAccounts;
 
 use App\Enums\BulkMailerSmtpHealthStatus;
 use App\Enums\BulkMailerTagType;
+use App\Mail\BulkMailerSmtpTestMail;
 use App\Models\BulkMailerSmtpAccount;
 use App\Models\BulkMailerTag;
+use App\Services\BulkMailerSmtpHealthService;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Livewire\Component;
 use Livewire\WithPagination;
-use Illuminate\Support\Facades\Config;
-use Illuminate\Support\Facades\Mail;
 
 class Index extends Component
 {
@@ -152,6 +154,7 @@ class Index extends Component
     public function toggleStatus(int $id): void
     {
         $smtp = BulkMailerSmtpAccount::findOrFail($id);
+
         $smtp->update([
             'is_active' => ! $smtp->is_active,
         ]);
@@ -167,7 +170,7 @@ class Index extends Component
         $this->showTestModal = true;
     }
 
-    public function sendTest(): void
+    public function sendTest(BulkMailerSmtpHealthService $smtpHealthService): void
     {
         $this->validate([
             'test_email' => ['required', 'email:rfc,dns'],
@@ -191,11 +194,9 @@ class Index extends Component
 
             Mail::mailer('bulk_mailer_test')
                 ->to($this->test_email)
-                ->send(new \App\Mail\BulkMailerSmtpTestMail($smtp));
+                ->send(new BulkMailerSmtpTestMail($smtp));
 
-            $smtp->update([
-                'health_status' => BulkMailerSmtpHealthStatus::Healthy,
-            ]);
+            $smtpHealthService->markSuccess($smtp);
 
             $this->showTestModal = false;
             $this->testId = null;
@@ -203,12 +204,28 @@ class Index extends Component
 
             session()->flash('success', 'Test email sent successfully.');
         } catch (\Throwable $e) {
-            $smtp->update([
-                'health_status' => BulkMailerSmtpHealthStatus::Failed,
-            ]);
+            $smtpHealthService->markFailure($smtp, $e->getMessage());
 
             $this->addError('test_email', 'Test email failed: '.$e->getMessage());
         }
+    }
+
+    public function resetHealth(int $id, BulkMailerSmtpHealthService $smtpHealthService): void
+    {
+        $smtp = BulkMailerSmtpAccount::findOrFail($id);
+
+        $smtpHealthService->reset($smtp);
+
+        session()->flash('success', 'SMTP health reset successfully.');
+    }
+
+    public function reEnable(int $id, BulkMailerSmtpHealthService $smtpHealthService): void
+    {
+        $smtp = BulkMailerSmtpAccount::findOrFail($id);
+
+        $smtpHealthService->reEnable($smtp);
+
+        session()->flash('success', 'SMTP account re-enabled successfully.');
     }
 
     public function closeModals(): void

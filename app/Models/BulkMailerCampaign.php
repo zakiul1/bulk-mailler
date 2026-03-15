@@ -22,6 +22,7 @@ class BulkMailerCampaign extends Model
         'status',
         'bulk_mailer_template_id',
         'bulk_mailer_segment_id',
+        'bulk_mailer_smtp_group_id',
         'scheduled_at',
         'started_at',
         'completed_at',
@@ -56,6 +57,11 @@ class BulkMailerCampaign extends Model
     public function segment(): BelongsTo
     {
         return $this->belongsTo(BulkMailerSegment::class, 'bulk_mailer_segment_id');
+    }
+
+    public function smtpGroup(): BelongsTo
+    {
+        return $this->belongsTo(BulkMailerSmtpGroup::class, 'bulk_mailer_smtp_group_id');
     }
 
     public function lists(): BelongsToMany

@@ -4,7 +4,7 @@
             <div>
                 <h1 class="text-xl font-semibold text-zinc-900 dark:text-white">Campaigns</h1>
                 <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                    Create campaigns, connect templates, choose lists, test delivery, and launch sending.
+                    Create campaigns, connect templates, choose lists, assign SMTP groups, test delivery, and launch sending.
                 </p>
             </div>
 
@@ -76,18 +76,40 @@
                             <tr>
                                 <td class="px-4 py-4 align-top">
                                     <div class="font-medium text-zinc-900 dark:text-white">{{ $row->name }}</div>
-                                    <div class="text-xs text-zinc-500 dark:text-zinc-400">{{ $row->subject }}</div>
+
+                                    <div class="text-xs text-zinc-500 dark:text-zinc-400">
+                                        {{ $row->subject ?: ($row->subject_a ?: 'No subject') }}
+                                    </div>
+
                                     <div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                                         Recipients: {{ number_format($row->total_recipients) }} |
                                         Sent: {{ number_format($row->sent_count) }} |
                                         Failed: {{ number_format($row->failed_count) }}
                                     </div>
+
+                                    @if ($row->ab_testing_enabled)
+                                        <div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                                            A/B Testing: Enabled
+                                        </div>
+                                    @endif
                                 </td>
 
                                 <td class="px-4 py-4 align-top">
                                     <div class="text-sm text-zinc-900 dark:text-white">
                                         {{ $row->template?->name ?: 'No template' }}
                                     </div>
+
+                                    @if ($row->smtpGroup)
+                                        <div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                                            SMTP Group: {{ $row->smtpGroup->name }}
+                                        </div>
+                                    @endif
+
+                                    @if ($row->segment)
+                                        <div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                                            Segment: {{ $row->segment->name }}
+                                        </div>
+                                    @endif
                                 </td>
 
                                 <td class="px-4 py-4 align-top">
@@ -238,85 +260,61 @@
                     </div>
 
                     <div class="overflow-y-auto p-6">
-                        <div class="grid gap-6 xl:grid-cols-3">
-                            <div class="xl:col-span-2">
-                                <div class="grid gap-4">
-                                    <div>
-                                        <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Campaign Name</label>
-                                        <input
-                                            type="text"
-                                            wire:model.defer="name"
-                                            class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+                        <div class="grid gap-4">
+                            <div>
+                                <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Campaign Name</label>
+                                <input
+                                    type="text"
+                                    wire:model.defer="name"
+                                    class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+                                >
+                                @error('name') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
+                            </div>
+
+                            <div class="grid gap-4 md:grid-cols-2">
+                                <div>
+                                    <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Template</label>
+                                    <select
+                                        wire:model.live="bulk_mailer_template_id"
+                                        class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+                                    >
+                                        <option value="">No template</option>
+                                        @foreach ($this->templates as $template)
+                                            <option value="{{ $template->id }}">{{ $template->name }}</option>
+                                        @endforeach
+                                    </select>
+                                    @error('bulk_mailer_template_id') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
+                                </div>
+
+                                <div>
+                                    <div class="mb-2 flex items-center justify-between">
+                                        <label class="block text-sm font-medium text-zinc-900 dark:text-white">Select Lists</label>
+
+                                        <a
+                                            href="{{ route('bulk-mailer.lists.index') }}"
+                                            wire:navigate
+                                            class="text-xs text-zinc-600 underline dark:text-zinc-300"
                                         >
-                                        @error('name') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
+                                            Manage lists
+                                        </a>
                                     </div>
 
-                                    <div>
-                                        <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Template</label>
-                                        <select
-                                            wire:model.live="bulk_mailer_template_id"
-                                            class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
-                                        >
-                                            <option value="">No template</option>
-                                            @foreach ($this->templates as $template)
-                                                <option value="{{ $template->id }}">{{ $template->name }}</option>
-                                            @endforeach
-                                        </select>
-                                        @error('bulk_mailer_template_id') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
-                                    </div>
-
-                                    <div>
-                                        <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Subject</label>
-                                        <input
-                                            type="text"
-                                            wire:model.defer="subject"
-                                            class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
-                                        >
-                                        @error('subject') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
-                                    </div>
-
-                                    <div class="grid gap-4 md:grid-cols-2">
-                                        <div>
-                                            <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Status</label>
-                                            <select
-                                                wire:model.live="status"
-                                                class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
-                                            >
-                                                <option value="draft">Draft</option>
-                                                <option value="scheduled">Scheduled</option>
-                                                <option value="paused">Paused</option>
-                                                <option value="cancelled">Cancelled</option>
-                                            </select>
-                                            @error('status') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
-                                        </div>
-
-                                        <div>
-                                            <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Schedule Time</label>
+                                    <div class="border border-zinc-300 dark:border-zinc-700">
+                                        <div class="border-b border-zinc-200 p-3 dark:border-zinc-700">
                                             <input
-                                                type="datetime-local"
-                                                wire:model.defer="scheduled_at"
-                                                class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+                                                type="text"
+                                                wire:model.live.debounce.300ms="listSearch"
+                                                placeholder="Search lists"
+                                                class="w-full border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
                                             >
-                                            @error('scheduled_at') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <div class="mb-2 flex items-center justify-between">
-                                            <label class="block text-sm font-medium text-zinc-900 dark:text-white">Select Lists</label>
-
-                                            <a
-                                                href="{{ route('bulk-mailer.lists.index') }}"
-                                                wire:navigate
-                                                class="text-xs text-zinc-600 underline dark:text-zinc-300"
-                                            >
-                                                Manage lists
-                                            </a>
+                                            <div class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                                                Selected: {{ count($selected_lists) }}
+                                            </div>
                                         </div>
 
-                                        <div class="grid gap-2 md:grid-cols-2">
-                                            @forelse ($this->lists as $list)
-                                                <label class="flex items-center gap-3 border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700">
+                                        <div class="max-h-64 overflow-y-auto">
+                                            @forelse ($this->filteredLists as $list)
+                                                <label class="flex cursor-pointer items-center gap-3 border-b border-zinc-200 px-3 py-2 text-sm last:border-b-0 dark:border-zinc-800">
                                                     <input
                                                         type="checkbox"
                                                         wire:model.live="selected_lists"
@@ -326,50 +324,121 @@
                                                     <span class="text-zinc-900 dark:text-white">{{ $list->name }}</span>
                                                 </label>
                                             @empty
-                                                <div class="border border-zinc-300 px-3 py-3 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400 md:col-span-2">
-                                                    No active lists found. Create a list first.
+                                                <div class="px-3 py-4 text-sm text-zinc-500 dark:text-zinc-400">
+                                                    No lists found.
                                                 </div>
                                             @endforelse
                                         </div>
-
-                                        @error('selected_lists') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
-                                        @error('selected_lists.*') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
                                     </div>
+
+                                    @error('selected_lists') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
+                                    @error('selected_lists.*') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
                                 </div>
                             </div>
 
-                            <div>
-                                <div class="border border-zinc-200 p-4 dark:border-zinc-700">
-                                    <h3 class="text-sm font-semibold text-zinc-900 dark:text-white">Campaign Summary</h3>
-
-                                    <div class="mt-4 space-y-3 text-sm">
-                                        <div class="border border-zinc-200 p-3 dark:border-zinc-700">
-                                            <div class="text-xs text-zinc-500 dark:text-zinc-400">Estimated Recipients</div>
-                                            <div class="mt-1 text-lg font-semibold text-zinc-900 dark:text-white">
-                                                {{ number_format($this->estimatedRecipients) }}
-                                            </div>
-                                        </div>
-
-                                        <div class="border border-zinc-200 p-3 dark:border-zinc-700">
-                                            <div class="text-xs text-zinc-500 dark:text-zinc-400">Status Rule</div>
-                                            <div class="mt-1 text-sm text-zinc-900 dark:text-white">
-                                                Scheduled campaigns require a schedule time.
-                                            </div>
-                                        </div>
-
-                                        <div class="border border-zinc-200 p-3 dark:border-zinc-700">
-                                            <div class="text-xs text-zinc-500 dark:text-zinc-400">Delivery Rule</div>
-                                            <div class="mt-1 text-sm text-zinc-900 dark:text-white">
-                                                Only verified valid active contacts in selected lists are counted.
-                                            </div>
-                                        </div>
-                                    </div>
+                            <div class="grid gap-4 md:grid-cols-3">
+                                <div>
+                                    <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Segment</label>
+                                    <select
+                                        wire:model.live="bulk_mailer_segment_id"
+                                        class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+                                    >
+                                        <option value="">No segment</option>
+                                        @foreach ($this->segments as $segment)
+                                            <option value="{{ $segment->id }}">{{ $segment->name }}</option>
+                                        @endforeach
+                                    </select>
+                                    @error('bulk_mailer_segment_id') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
                                 </div>
 
-                                <div class="mt-4 border border-zinc-200 p-4 dark:border-zinc-700">
-                                    <h3 class="text-sm font-semibold text-zinc-900 dark:text-white">Next Step</h3>
-                                    <div class="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
-                                        Save first, then use Test, Launch, or Details from the campaigns table.
+                                <div>
+                                    <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">SMTP Group</label>
+                                    <select
+                                        wire:model.live="bulk_mailer_smtp_group_id"
+                                        class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+                                    >
+                                        <option value="">Select SMTP Group</option>
+                                        @foreach ($this->smtpGroups as $smtpGroup)
+                                            <option value="{{ $smtpGroup->id }}">{{ $smtpGroup->name }}</option>
+                                        @endforeach
+                                    </select>
+                                    @error('bulk_mailer_smtp_group_id') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
+                                </div>
+
+                                <div>
+                                    <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Status</label>
+                                    <select
+                                        wire:model.live="status"
+                                        class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+                                    >
+                                        <option value="draft">Draft</option>
+                                        <option value="scheduled">Scheduled</option>
+                                        <option value="paused">Paused</option>
+                                        <option value="cancelled">Cancelled</option>
+                                    </select>
+                                    @error('status') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
+                                </div>
+                            </div>
+
+                            <div class="border border-zinc-200 p-3 dark:border-zinc-700">
+                                <label class="flex items-center gap-2 text-sm font-medium text-zinc-900 dark:text-white">
+                                    <input type="checkbox" wire:model.live="ab_testing_enabled" class="h-4 w-4 border border-zinc-300 dark:border-zinc-700">
+                                    <span>Enable A/B Subject Testing</span>
+                                </label>
+                            </div>
+
+                            @if ($ab_testing_enabled)
+                                <div class="grid gap-4 md:grid-cols-2">
+                                    <div>
+                                        <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Subject A</label>
+                                        <input
+                                            type="text"
+                                            wire:model.defer="subject_a"
+                                            class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+                                        >
+                                        @error('subject_a') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
+                                    </div>
+
+                                    <div>
+                                        <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Subject B</label>
+                                        <input
+                                            type="text"
+                                            wire:model.defer="subject_b"
+                                            class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+                                        >
+                                        @error('subject_b') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
+                                    </div>
+                                </div>
+                            @else
+                                <div>
+                                    <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Subject</label>
+                                    <input
+                                        type="text"
+                                        wire:model.defer="subject"
+                                        class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+                                    >
+                                    @error('subject') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
+                                </div>
+                            @endif
+
+                            <div class="grid gap-4 md:grid-cols-2">
+                                <div>
+                                    <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Schedule Time</label>
+                                    <input
+                                        type="datetime-local"
+                                        wire:model.defer="scheduled_at"
+                                        class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+                                    >
+                                    @error('scheduled_at') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
+                                </div>
+
+                                <div class="border border-zinc-200 p-3 dark:border-zinc-700">
+                                    <div class="text-xs text-zinc-500 dark:text-zinc-400">Estimated Recipients</div>
+                                    <div class="mt-1 text-lg font-semibold text-zinc-900 dark:text-white">
+                                        {{ number_format($this->estimatedRecipients) }}
+                                    </div>
+                                    <div class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                                        Only verified valid active contacts in selected lists or segment are counted.
                                     </div>
                                 </div>
                             </div>

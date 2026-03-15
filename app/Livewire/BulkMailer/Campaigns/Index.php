@@ -10,9 +10,10 @@ use App\Models\BulkMailerCampaignRecipient;
 use App\Models\BulkMailerContact;
 use App\Models\BulkMailerContactList;
 use App\Models\BulkMailerSegment;
-use App\Models\BulkMailerSmtpAccount;
+use App\Models\BulkMailerSmtpGroup;
 use App\Models\BulkMailerTemplate;
 use App\Services\BulkMailerSegmentService;
+use App\Services\BulkMailerSmtpRotationService;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\Rule;
@@ -45,7 +46,9 @@ class Index extends Component
     public string $scheduled_at = '';
     public string $bulk_mailer_template_id = '';
     public string $bulk_mailer_segment_id = '';
+    public string $bulk_mailer_smtp_group_id = '';
     public array $selected_lists = [];
+    public string $listSearch = '';
 
     public string $test_email = '';
     public string $reschedule_at = '';
@@ -98,7 +101,9 @@ class Index extends Component
         $this->scheduled_at = $campaign->scheduled_at?->format('Y-m-d\TH:i') ?? '';
         $this->bulk_mailer_template_id = (string) ($campaign->bulk_mailer_template_id ?? '');
         $this->bulk_mailer_segment_id = (string) ($campaign->bulk_mailer_segment_id ?? '');
-        $this->selected_lists = $campaign->lists->pluck('id')->map(fn ($listId) => (string) $listId)->all();
+        $this->bulk_mailer_smtp_group_id = (string) ($campaign->bulk_mailer_smtp_group_id ?? '');
+        $this->selected_lists = $campaign->lists->pluck('id')->map(fn ($id) => (string) $id)->all();
+        $this->listSearch = '';
 
         $this->resetValidation();
         $this->showFormModal = true;
@@ -116,13 +121,14 @@ class Index extends Component
 
         $payload = [
             'name' => trim($validated['name']),
-            'subject' => trim($validated['subject']),
+            'subject' => $validated['subject'] ? trim($validated['subject']) : null,
             'subject_a' => $validated['subject_a'] ?: null,
             'subject_b' => $validated['subject_b'] ?: null,
             'ab_testing_enabled' => (bool) $validated['ab_testing_enabled'],
             'status' => $validated['status'],
             'bulk_mailer_template_id' => $validated['bulk_mailer_template_id'] ?: null,
             'bulk_mailer_segment_id' => $validated['bulk_mailer_segment_id'] ?: null,
+            'bulk_mailer_smtp_group_id' => $validated['bulk_mailer_smtp_group_id'] ?: null,
             'scheduled_at' => $validated['status'] === 'scheduled' ? $validated['scheduled_at'] : null,
             'total_recipients' => $recipientCount,
         ];
@@ -161,6 +167,7 @@ class Index extends Component
             'status' => BulkMailerCampaignStatus::Draft,
             'bulk_mailer_template_id' => $campaign->bulk_mailer_template_id,
             'bulk_mailer_segment_id' => $campaign->bulk_mailer_segment_id,
+            'bulk_mailer_smtp_group_id' => $campaign->bulk_mailer_smtp_group_id,
             'scheduled_at' => null,
             'total_recipients' => $campaign->total_recipients,
             'sent_count' => 0,
@@ -212,23 +219,23 @@ class Index extends Component
         $this->showTestModal = true;
     }
 
-    public function sendTest(): void
+    public function sendTest(BulkMailerSmtpRotationService $rotationService): void
     {
         $this->validate([
             'test_email' => ['required', 'email:rfc,dns'],
         ]);
 
-        $campaign = BulkMailerCampaign::with('template')->findOrFail($this->testId);
+        $campaign = BulkMailerCampaign::with(['template', 'smtpGroup.smtpAccounts'])->findOrFail($this->testId);
 
         if (! $campaign->template) {
             $this->addError('test_email', 'This campaign has no template.');
             return;
         }
 
-        $smtp = $this->resolveAvailableSmtp();
+        $smtp = $rotationService->resolveForCampaign($campaign);
 
         if (! $smtp) {
-            $this->addError('test_email', 'No active SMTP account with remaining daily limit was found.');
+            $this->addError('test_email', 'No available SMTP account was found for this campaign.');
             return;
         }
 
@@ -250,12 +257,11 @@ class Index extends Component
                 '{{last_name}}' => 'Recipient',
             ];
 
-            $subjectLine = strtr(
-                $campaign->ab_testing_enabled && filled($campaign->subject_a)
-                    ? $campaign->subject_a
-                    : ($campaign->subject ?: $campaign->template->subject),
-                $sampleData
-            );
+            $subjectTemplate = $campaign->ab_testing_enabled && filled($campaign->subject_a)
+                ? $campaign->subject_a
+                : ($campaign->subject ?: $campaign->template->subject);
+
+            $subjectLine = strtr($subjectTemplate, $sampleData);
 
             $htmlSource = $campaign->template->html_content;
             $textSource = $campaign->template->text_content;
@@ -288,12 +294,22 @@ class Index extends Component
         }
     }
 
-    public function launch(int $id): void
+    public function launch(int $id, BulkMailerSmtpRotationService $rotationService): void
     {
-        $campaign = BulkMailerCampaign::with(['template', 'lists'])->findOrFail($id);
+        $campaign = BulkMailerCampaign::with(['template', 'lists', 'smtpGroup.smtpAccounts'])->findOrFail($id);
 
         if (! $campaign->template) {
             session()->flash('error', 'Campaign must have a template before launch.');
+            return;
+        }
+
+        if (! $campaign->bulk_mailer_smtp_group_id) {
+            session()->flash('error', 'Campaign must have an SMTP group before launch.');
+            return;
+        }
+
+        if (! $rotationService->resolveForCampaign($campaign)) {
+            session()->flash('error', 'No available SMTP account was found in the selected group.');
             return;
         }
 
@@ -393,6 +409,7 @@ class Index extends Component
         $this->deleteId = null;
         $this->testId = null;
         $this->rescheduleId = null;
+        $this->listSearch = '';
         $this->resetValidation();
     }
 
@@ -408,7 +425,9 @@ class Index extends Component
         $this->scheduled_at = '';
         $this->bulk_mailer_template_id = '';
         $this->bulk_mailer_segment_id = '';
+        $this->bulk_mailer_smtp_group_id = '';
         $this->selected_lists = [];
+        $this->listSearch = '';
         $this->resetValidation();
     }
 
@@ -424,6 +443,7 @@ class Index extends Component
             'scheduled_at' => [Rule::requiredIf($this->status === 'scheduled'), 'nullable', 'date'],
             'bulk_mailer_template_id' => ['nullable', 'integer', 'exists:bulk_mailer_templates,id'],
             'bulk_mailer_segment_id' => ['nullable', 'integer', 'exists:bulk_mailer_segments,id'],
+            'bulk_mailer_smtp_group_id' => ['required', 'integer', 'exists:bulk_mailer_smtp_groups,id'],
             'selected_lists' => ['nullable', 'array'],
             'selected_lists.*' => ['integer', 'exists:bulk_mailer_contact_lists,id'],
         ];
@@ -436,6 +456,7 @@ class Index extends Component
             'subject.required_unless' => 'Campaign subject is required when A/B testing is disabled.',
             'status.required' => 'Campaign status is required.',
             'scheduled_at.required' => 'Schedule time is required for scheduled campaigns.',
+            'bulk_mailer_smtp_group_id.required' => 'SMTP group is required.',
         ];
     }
 
@@ -465,17 +486,6 @@ class Index extends Component
             ->count('bulk_mailer_contacts.id');
     }
 
-    protected function resolveAvailableSmtp(): ?BulkMailerSmtpAccount
-    {
-        return BulkMailerSmtpAccount::query()
-            ->where('is_active', true)
-            ->orderBy('priority')
-            ->get()
-            ->first(function (BulkMailerSmtpAccount $smtp) {
-                return $smtp->remaining_today > 0;
-            });
-    }
-
     public function getEstimatedRecipientsProperty(): int
     {
         return $this->calculateRecipientCount(
@@ -488,7 +498,7 @@ class Index extends Component
     public function getRowsProperty()
     {
         return BulkMailerCampaign::query()
-            ->with(['template', 'lists', 'segment'])
+            ->with(['template', 'lists', 'segment', 'smtpGroup'])
             ->when($this->search !== '', function ($query) {
                 $query->where(function ($subQuery) {
                     $subQuery
@@ -519,9 +529,28 @@ class Index extends Component
             ->get();
     }
 
+    public function getFilteredListsProperty()
+    {
+        return BulkMailerContactList::query()
+            ->where('is_active', true)
+            ->when($this->listSearch !== '', function ($query) {
+                $query->where('name', 'like', '%'.$this->listSearch.'%');
+            })
+            ->orderBy('name')
+            ->get();
+    }
+
     public function getSegmentsProperty()
     {
         return BulkMailerSegment::query()
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get();
+    }
+
+    public function getSmtpGroupsProperty()
+    {
+        return BulkMailerSmtpGroup::query()
             ->where('is_active', true)
             ->orderBy('name')
             ->get();

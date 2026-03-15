@@ -4,7 +4,7 @@
             <div>
                 <h1 class="text-xl font-semibold text-zinc-900 dark:text-white">SMTP Accounts</h1>
                 <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                    Create, edit, test, enable, disable, and organize SMTP accounts for future campaign rotation.
+                    Create, edit, test, enable, disable, monitor health, and organize SMTP accounts for campaign rotation.
                 </p>
             </div>
 
@@ -99,8 +99,46 @@
 
                                 <td class="px-4 py-4 align-top">
                                     <div class="text-sm text-zinc-900 dark:text-white">{{ $row->is_active ? 'Active' : 'Inactive' }}</div>
-                                    <div class="text-xs text-zinc-500 dark:text-zinc-400">Health: {{ $row->health_status?->value ?? $row->health_status }}</div>
-                                    <div class="text-xs text-zinc-500 dark:text-zinc-400">Priority: {{ $row->priority }}</div>
+                                    <div class="text-xs text-zinc-500 dark:text-zinc-400">
+                                        Health: {{ $row->health_status?->value ?? $row->health_status }}
+                                    </div>
+                                    <div class="text-xs text-zinc-500 dark:text-zinc-400">
+                                        Priority: {{ $row->priority }}
+                                    </div>
+                                    <div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                                        Failures: {{ number_format($row->failure_count ?? 0) }} |
+                                        Consecutive: {{ number_format($row->consecutive_failures ?? 0) }}
+                                    </div>
+
+                                    @if ($row->cooldown_until)
+                                        <div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                                            Cooldown Until: {{ $row->cooldown_until->format('Y-m-d h:i A') }}
+                                        </div>
+                                    @endif
+
+                                    @if ($row->last_failed_at)
+                                        <div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                                            Last Failed: {{ $row->last_failed_at->format('Y-m-d h:i A') }}
+                                        </div>
+                                    @endif
+
+                                    @if ($row->last_success_at)
+                                        <div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                                            Last Success: {{ $row->last_success_at->format('Y-m-d h:i A') }}
+                                        </div>
+                                    @endif
+
+                                    @if ($row->auto_disabled_at)
+                                        <div class="mt-1 text-xs text-red-600 dark:text-red-400">
+                                            Auto Disabled: {{ $row->auto_disabled_at->format('Y-m-d h:i A') }}
+                                        </div>
+                                    @endif
+
+                                    @if ($row->auto_disabled_reason)
+                                        <div class="mt-1 text-xs text-red-600 dark:text-red-400">
+                                            Reason: {{ $row->auto_disabled_reason }}
+                                        </div>
+                                    @endif
                                 </td>
 
                                 <td class="px-4 py-4 align-top">
@@ -117,19 +155,53 @@
 
                                 <td class="px-4 py-4 align-top">
                                     <div class="flex flex-wrap justify-end gap-2">
-                                        <button type="button" wire:click="openTestModal({{ $row->id }})" class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800">
+                                        <button
+                                            type="button"
+                                            wire:click="openTestModal({{ $row->id }})"
+                                            class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800"
+                                        >
                                             Test
                                         </button>
 
-                                        <button type="button" wire:click="toggleStatus({{ $row->id }})" class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800">
+                                        <button
+                                            type="button"
+                                            wire:click="resetHealth({{ $row->id }})"
+                                            class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800"
+                                        >
+                                            Reset Health
+                                        </button>
+
+                                        @if ($row->auto_disabled_at)
+                                            <button
+                                                type="button"
+                                                wire:click="reEnable({{ $row->id }})"
+                                                class="border border-emerald-300 px-3 py-1.5 text-xs text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950"
+                                            >
+                                                Re-Enable
+                                            </button>
+                                        @endif
+
+                                        <button
+                                            type="button"
+                                            wire:click="toggleStatus({{ $row->id }})"
+                                            class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800"
+                                        >
                                             {{ $row->is_active ? 'Disable' : 'Enable' }}
                                         </button>
 
-                                        <button type="button" wire:click="edit({{ $row->id }})" class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800">
+                                        <button
+                                            type="button"
+                                            wire:click="edit({{ $row->id }})"
+                                            class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800"
+                                        >
                                             Edit
                                         </button>
 
-                                        <button type="button" wire:click="confirmDelete({{ $row->id }})" class="border border-red-300 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950">
+                                        <button
+                                            type="button"
+                                            wire:click="confirmDelete({{ $row->id }})"
+                                            class="border border-red-300 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
+                                        >
                                             Delete
                                         </button>
                                     </div>

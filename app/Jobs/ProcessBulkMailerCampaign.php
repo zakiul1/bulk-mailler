@@ -9,10 +9,11 @@ use App\Models\BulkMailerCampaign;
 use App\Models\BulkMailerCampaignRecipient;
 use App\Models\BulkMailerContact;
 use App\Models\BulkMailerSegment;
-use App\Models\BulkMailerSmtpAccount;
 use App\Models\BulkMailerSmtpDailyUsage;
 use App\Services\BulkMailerDeliveryEventService;
 use App\Services\BulkMailerSegmentService;
+use App\Services\BulkMailerSmtpHealthService;
+use App\Services\BulkMailerSmtpRotationService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -33,11 +34,13 @@ class ProcessBulkMailerCampaign implements ShouldQueue
 
     public function handle(
         BulkMailerDeliveryEventService $eventService,
-        BulkMailerSegmentService $segmentService
+        BulkMailerSegmentService $segmentService,
+        BulkMailerSmtpRotationService $rotationService,
+        BulkMailerSmtpHealthService $smtpHealthService
     ): void {
-        $campaign = BulkMailerCampaign::with(['template', 'lists', 'segment'])->find($this->campaignId);
+        $campaign = BulkMailerCampaign::with(['template', 'lists', 'segment', 'smtpGroup.smtpAccounts'])->find($this->campaignId);
 
-        if (! $campaign || ! $campaign->template) {
+        if (! $campaign || ! $campaign->template || ! $campaign->smtpGroup) {
             return;
         }
 
@@ -71,7 +74,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
         }
 
         foreach ($pendingRecipients as $recipient) {
-            $smtp = $this->resolveAvailableSmtp();
+            $smtp = $rotationService->resolveForCampaign($campaign->fresh('smtpGroup.smtpAccounts'));
 
             if (! $smtp) {
                 $campaign->update([
@@ -89,6 +92,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
                         'error_message' => 'Recipient contact record not found.',
                     ]);
 
+                    $smtpHealthService->markFailure($smtp, 'Recipient contact record not found.');
                     $eventService->logFailed($recipient, 'Recipient contact record not found.');
                     continue;
                 }
@@ -138,6 +142,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
                 ]);
 
                 $this->incrementDailyUsage($smtp->id);
+                $smtpHealthService->markSuccess($smtp);
                 $eventService->logSent($recipient);
             } catch (\Throwable $e) {
                 $recipient->update([
@@ -146,6 +151,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
                     'error_message' => mb_substr($e->getMessage(), 0, 1000),
                 ]);
 
+                $smtpHealthService->markFailure($smtp, mb_substr($e->getMessage(), 0, 1000));
                 $eventService->logFailed($recipient, mb_substr($e->getMessage(), 0, 1000));
             }
         }
@@ -214,17 +220,6 @@ class ProcessBulkMailerCampaign implements ShouldQueue
                 ->where('bulk_mailer_campaign_id', $campaign->id)
                 ->count(),
         ]);
-    }
-
-    protected function resolveAvailableSmtp(): ?BulkMailerSmtpAccount
-    {
-        return BulkMailerSmtpAccount::query()
-            ->where('is_active', true)
-            ->orderBy('priority')
-            ->get()
-            ->first(function (BulkMailerSmtpAccount $smtp) {
-                return $smtp->remaining_today > 0;
-            });
     }
 
     protected function incrementDailyUsage(int $smtpId): void

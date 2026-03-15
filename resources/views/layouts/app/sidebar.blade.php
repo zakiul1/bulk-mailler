@@ -88,6 +88,9 @@
                         <flux:sidebar.item icon="server-stack" :href="route('bulk-mailer.smtp-accounts.index')" :current="request()->routeIs('bulk-mailer.smtp-accounts.*')" wire:navigate>
                             {{ __('Sending Accounts') }}
                         </flux:sidebar.item>
+                        <flux:sidebar.item icon="squares-2x2" :href="route('bulk-mailer.smtp-groups.index')" :current="request()->routeIs('bulk-mailer.smtp-groups.*')" wire:navigate>
+    {{ __('SMTP Groups') }}
+</flux:sidebar.item>
 
                         <flux:sidebar.item icon="chart-bar-square" :href="route('bulk-mailer.smtp-analytics.index')" :current="request()->routeIs('bulk-mailer.smtp-analytics.*')" wire:navigate>
                             {{ __('Sending Analytics') }}
