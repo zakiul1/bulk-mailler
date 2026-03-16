@@ -27,7 +27,7 @@
                     {{ __('Contacts') }}
                 </flux:sidebar.item>
 
-                <flux:sidebar.item icon="document-text" :href="route('bulk-mailer.templates.index')" :current="request()->routeIs('bulk-mailer.templates.index')" wire:navigate>
+                <flux:sidebar.item icon="document-text" :href="route('bulk-mailer.templates.index')" :current="request()->routeIs('bulk-mailer.templates.*')" wire:navigate>
                     {{ __('Templates') }}
                 </flux:sidebar.item>
 
@@ -60,7 +60,7 @@
                 </div>
 
                 <div
-                    x-data="{ open: {{ request()->routeIs('bulk-mailer.verifications.*') || request()->routeIs('bulk-mailer.templates.builder') || request()->routeIs('bulk-mailer.campaigns.calendar') || request()->routeIs('bulk-mailer.smtp-accounts.*') || request()->routeIs('bulk-mailer.smtp-analytics.*') || request()->routeIs('bulk-mailer.operations.*') ? 'true' : 'false' }} }"
+                    x-data="{ open: {{ request()->routeIs('bulk-mailer.campaigns.calendar') || request()->routeIs('bulk-mailer.smtp-accounts.*') || request()->routeIs('bulk-mailer.smtp-groups.*') || request()->routeIs('bulk-mailer.smtp-analytics.*') || request()->routeIs('bulk-mailer.operations.*') ? 'true' : 'false' }} }"
                     class="border-t border-zinc-200 pt-3 dark:border-zinc-800"
                 >
                     <button
@@ -73,24 +73,17 @@
                     </button>
 
                     <div x-show="open" x-collapse class="mt-1 space-y-1">
-                        <flux:sidebar.item icon="shield-check" :href="route('bulk-mailer.verifications.index')" :current="request()->routeIs('bulk-mailer.verifications.*')" wire:navigate>
-                            {{ __('Email Verification') }}
-                        </flux:sidebar.item>
-
-                        <flux:sidebar.item icon="swatch" :href="route('bulk-mailer.templates.builder')" :current="request()->routeIs('bulk-mailer.templates.builder')" wire:navigate>
-                            {{ __('Email Builder') }}
-                        </flux:sidebar.item>
-
                         <flux:sidebar.item icon="calendar-days" :href="route('bulk-mailer.campaigns.calendar')" :current="request()->routeIs('bulk-mailer.campaigns.calendar')" wire:navigate>
                             {{ __('Campaign Calendar') }}
                         </flux:sidebar.item>
 
                         <flux:sidebar.item icon="server-stack" :href="route('bulk-mailer.smtp-accounts.index')" :current="request()->routeIs('bulk-mailer.smtp-accounts.*')" wire:navigate>
-                            {{ __('Sending Accounts') }}
+                            {{ __('SMTP Accounts') }}
                         </flux:sidebar.item>
+
                         <flux:sidebar.item icon="squares-2x2" :href="route('bulk-mailer.smtp-groups.index')" :current="request()->routeIs('bulk-mailer.smtp-groups.*')" wire:navigate>
-    {{ __('SMTP Groups') }}
-</flux:sidebar.item>
+                            {{ __('SMTP Groups') }}
+                        </flux:sidebar.item>
 
                         <flux:sidebar.item icon="chart-bar-square" :href="route('bulk-mailer.smtp-analytics.index')" :current="request()->routeIs('bulk-mailer.smtp-analytics.*')" wire:navigate>
                             {{ __('Sending Analytics') }}

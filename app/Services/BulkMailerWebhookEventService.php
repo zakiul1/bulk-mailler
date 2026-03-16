@@ -2,9 +2,11 @@
 
 namespace App\Services;
 
+use App\Enums\BulkMailerCampaignRecipientStatus;
 use App\Models\BulkMailerCampaignRecipient;
 use App\Models\BulkMailerContact;
 use App\Models\BulkMailerDeliveryEvent;
+use Carbon\Carbon;
 
 class BulkMailerWebhookEventService
 {
@@ -12,19 +14,36 @@ class BulkMailerWebhookEventService
     {
         $normalized = $this->normalize($provider, $payload);
 
-        $contact = BulkMailerContact::where('email', $normalized['email'])->first();
+        $contact = BulkMailerContact::query()
+            ->whereRaw('LOWER(email) = ?', [$normalized['email']])
+            ->first();
 
         $recipient = BulkMailerCampaignRecipient::query()
-            ->where('email', $normalized['email'])
+            ->whereRaw('LOWER(email) = ?', [$normalized['email']])
             ->latest()
             ->first();
 
-        if (in_array($normalized['event_type'], ['bounce', 'complaint'], true) && $contact) {
+        if ($contact && in_array($normalized['event_type'], ['bounce', 'complaint'], true)) {
             $contact->update([
                 'status' => $normalized['event_type'] === 'bounce' ? 'bounced' : 'suppressed',
                 'bounced_at' => now(),
-                'suppression_reason' => ucfirst($normalized['event_type']).' webhook event',
+                'suppression_reason' => $normalized['message'] ?: ucfirst($normalized['event_type']) . ' webhook event',
             ]);
+        }
+
+        if ($recipient) {
+            if (in_array($normalized['event_type'], ['bounce', 'complaint'], true)) {
+                $recipient->update([
+                    'status' => BulkMailerCampaignRecipientStatus::Failed,
+                    'error_message' => $normalized['message'] ?: ucfirst($normalized['event_type']) . ' webhook event',
+                ]);
+            }
+
+            if ($normalized['event_type'] === 'delivered' && ! $recipient->sent_at) {
+                $recipient->update([
+                    'sent_at' => now(),
+                ]);
+            }
         }
 
         return BulkMailerDeliveryEvent::create([
@@ -33,7 +52,7 @@ class BulkMailerWebhookEventService
             'bulk_mailer_campaign_recipient_id' => $recipient?->id,
             'email' => $normalized['email'],
             'event_type' => $normalized['event_type'],
-            'provider' => $provider,
+            'provider' => strtolower($provider),
             'provider_event_id' => $normalized['provider_event_id'],
             'message' => $normalized['message'],
             'payload' => $payload,
@@ -43,61 +62,104 @@ class BulkMailerWebhookEventService
 
     protected function normalize(string $provider, array $payload): array
     {
-        $provider = strtolower($provider);
+        $provider = strtolower(trim($provider));
 
         return match ($provider) {
             'mailgun' => [
-                'email' => strtolower((string) ($payload['recipient'] ?? '')),
-                'event_type' => strtolower((string) ($payload['event'] ?? 'unknown')),
+                'email' => strtolower(trim((string) ($payload['recipient'] ?? ''))),
+                'event_type' => $this->mapMailgunType((string) ($payload['event'] ?? 'unknown')),
                 'provider_event_id' => (string) ($payload['id'] ?? ''),
                 'message' => (string) ($payload['reason'] ?? $payload['description'] ?? ''),
-                'event_at' => now(),
+                'event_at' => $this->parseEventAt($payload['timestamp'] ?? null),
             ],
             'postmark' => [
-                'email' => strtolower((string) ($payload['Email'] ?? '')),
+                'email' => strtolower(trim((string) ($payload['Email'] ?? ''))),
                 'event_type' => $this->mapPostmarkType((string) ($payload['RecordType'] ?? '')),
                 'provider_event_id' => (string) ($payload['MessageID'] ?? ''),
                 'message' => (string) ($payload['Description'] ?? ''),
-                'event_at' => now(),
+                'event_at' => $this->parseEventAt($payload['ReceivedAt'] ?? null),
             ],
             'ses' => [
-                'email' => strtolower((string) data_get($payload, 'mail.destination.0', '')),
+                'email' => strtolower(trim((string) data_get($payload, 'mail.destination.0', ''))),
                 'event_type' => $this->mapSesType((string) ($payload['eventType'] ?? '')),
                 'provider_event_id' => (string) data_get($payload, 'mail.messageId', ''),
-                'message' => (string) data_get($payload, 'bounce.bouncedRecipients.0.diagnosticCode', ''),
-                'event_at' => now(),
+                'message' => (string) (
+                    data_get($payload, 'bounce.bouncedRecipients.0.diagnosticCode')
+                    ?: data_get($payload, 'complaint.complainedRecipients.0.emailAddress')
+                    ?: ''
+                ),
+                'event_at' => $this->parseEventAt(
+                    data_get($payload, 'mail.timestamp')
+                    ?: data_get($payload, 'delivery.timestamp')
+                    ?: data_get($payload, 'bounce.timestamp')
+                    ?: data_get($payload, 'complaint.timestamp')
+                ),
             ],
             default => [
-                'email' => strtolower((string) ($payload['email'] ?? '')),
+                'email' => strtolower(trim((string) ($payload['email'] ?? ''))),
                 'event_type' => strtolower((string) ($payload['event_type'] ?? 'unknown')),
                 'provider_event_id' => (string) ($payload['event_id'] ?? ''),
                 'message' => (string) ($payload['message'] ?? ''),
-                'event_at' => now(),
+                'event_at' => $this->parseEventAt($payload['event_at'] ?? null),
             ],
+        };
+    }
+
+    protected function mapMailgunType(string $type): string
+    {
+        return match (strtolower(trim($type))) {
+            'accepted' => 'accepted',
+            'delivered' => 'delivered',
+            'failed' => 'failed',
+            'rejected' => 'failed',
+            'bounced', 'permanent_fail', 'temporary_fail' => 'bounce',
+            'complained' => 'complaint',
+            'opened' => 'open',
+            'clicked' => 'click',
+            default => strtolower(trim($type ?: 'unknown')),
         };
     }
 
     protected function mapPostmarkType(string $type): string
     {
-        return match (strtolower($type)) {
+        return match (strtolower(trim($type))) {
             'bounce' => 'bounce',
             'delivery' => 'delivered',
             'open' => 'open',
             'click' => 'click',
             'spamcomplaint' => 'complaint',
-            default => strtolower($type ?: 'unknown'),
+            default => strtolower(trim($type ?: 'unknown')),
         };
     }
 
     protected function mapSesType(string $type): string
     {
-        return match (strtolower($type)) {
+        return match (strtolower(trim($type))) {
+            'send' => 'accepted',
+            'reject' => 'failed',
             'bounce' => 'bounce',
             'complaint' => 'complaint',
             'delivery' => 'delivered',
             'open' => 'open',
             'click' => 'click',
-            default => strtolower($type ?: 'unknown'),
+            default => strtolower(trim($type ?: 'unknown')),
         };
+    }
+
+    protected function parseEventAt(mixed $value): Carbon
+    {
+        if (is_numeric($value)) {
+            return Carbon::createFromTimestamp((int) $value);
+        }
+
+        if (is_string($value) && trim($value) !== '') {
+            try {
+                return Carbon::parse($value);
+            } catch (\Throwable) {
+                // fall through
+            }
+        }
+
+        return now();
     }
 }

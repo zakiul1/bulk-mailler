@@ -14,6 +14,7 @@ use App\Models\BulkMailerSmtpGroup;
 use App\Models\BulkMailerTemplate;
 use App\Services\BulkMailerSegmentService;
 use App\Services\BulkMailerSmtpRotationService;
+use Illuminate\Mail\MailManager;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\Rule;
@@ -159,7 +160,7 @@ class Index extends Component
         $campaign = BulkMailerCampaign::with('lists')->findOrFail($id);
 
         $clone = BulkMailerCampaign::create([
-            'name' => $campaign->name.' Copy',
+            'name' => $campaign->name . ' Copy',
             'subject' => $campaign->subject,
             'subject_a' => $campaign->subject_a,
             'subject_b' => $campaign->subject_b,
@@ -219,7 +220,7 @@ class Index extends Component
         $this->showTestModal = true;
     }
 
-    public function sendTest(BulkMailerSmtpRotationService $rotationService): void
+    public function sendTest(BulkMailerSmtpRotationService $rotationService, MailManager $mailManager): void
     {
         $this->validate([
             'test_email' => ['required', 'email:rfc,dns'],
@@ -240,48 +241,59 @@ class Index extends Component
         }
 
         try {
-            Config::set('mail.mailers.bulk_mailer_campaign_test', [
-                'transport' => 'smtp',
-                'host' => $smtp->host,
-                'port' => $smtp->port,
-                'encryption' => blank($smtp->encryption) ? null : $smtp->encryption,
-                'username' => $smtp->username,
-                'password' => $smtp->decrypted_password,
-                'timeout' => 30,
-            ]);
+            $this->configureCampaignTestMailer($smtp);
+            $mailManager->purge('bulk_mailer_campaign_test');
 
             $sampleData = [
-                '{{name}}' => 'Test Recipient',
+                '{{name}}' => $this->test_email,
                 '{{email}}' => $this->test_email,
                 '{{first_name}}' => 'Test',
                 '{{last_name}}' => 'Recipient',
             ];
 
-            $subjectTemplate = $campaign->ab_testing_enabled && filled($campaign->subject_a)
-                ? $campaign->subject_a
-                : ($campaign->subject ?: $campaign->template->subject);
+            $subjectTemplate = $campaign->subject ?: $campaign->template->subject;
 
-            $subjectLine = strtr($subjectTemplate, $sampleData);
+            if ($campaign->ab_testing_enabled) {
+                $subjectTemplate = filled($campaign->subject_a)
+                    ? $campaign->subject_a
+                    : $subjectTemplate;
+            }
+
+            $subjectLine = strtr((string) $subjectTemplate, $sampleData);
 
             $htmlSource = $campaign->template->html_content;
             $textSource = $campaign->template->text_content;
 
             $htmlBody = filled($htmlSource)
                 ? strtr($htmlSource, $sampleData)
-                : nl2br(e(strtr($textSource ?: '', $sampleData)));
+                : '';
+
+            $textBody = filled($textSource)
+                ? strtr($textSource, $sampleData)
+                : '';
+
+            if (! filled($htmlBody) && filled($textBody)) {
+                $htmlBody = nl2br(e($textBody));
+            }
+
+            $testContact = new BulkMailerContact([
+                'id' => 0,
+                'email' => $this->test_email,
+                'first_name' => 'Test',
+                'last_name' => 'Recipient',
+            ]);
+
+            $testContact->exists = false;
 
             Mail::mailer('bulk_mailer_campaign_test')
                 ->to($this->test_email)
                 ->send(new BulkMailerCampaignMail(
                     smtp: $smtp,
                     campaign: $campaign,
-                    contact: new \App\Models\BulkMailerContact([
-                        'email' => $this->test_email,
-                        'first_name' => 'Test',
-                        'last_name' => 'Recipient',
-                    ]),
+                    contact: $testContact,
                     subjectLine: $subjectLine,
-                    htmlBody: $htmlBody
+                    htmlBody: $htmlBody,
+                    textBody: filled($textBody) ? $textBody : null,
                 ));
 
             $this->showTestModal = false;
@@ -290,7 +302,9 @@ class Index extends Component
 
             session()->flash('success', 'Campaign test email sent successfully.');
         } catch (\Throwable $e) {
-            $this->addError('test_email', 'Test send failed: '.$e->getMessage());
+            $this->addError('test_email', 'Test send failed: ' . $e->getMessage());
+        } finally {
+            $mailManager->purge('bulk_mailer_campaign_test');
         }
     }
 
@@ -465,25 +479,52 @@ class Index extends Component
         $query = BulkMailerContact::query();
 
         if (! empty($listIds)) {
-            $query->whereHas('lists', function ($listQuery) use ($listIds) {
-                $listQuery->whereIn('bulk_mailer_contact_lists.id', array_map('intval', $listIds));
-            });
+            $query->whereIn('bulk_mailer_contact_list_id', array_map('intval', $listIds));
         }
 
         if ($segmentId) {
-            $segmentService->applySegment($query, BulkMailerSegment::find($segmentId));
-        } else {
-            $query->where('status', 'active')
-                ->whereNull('unsubscribed_at')
-                ->whereNull('bounced_at')
-                ->whereHas('verification', function ($verificationQuery) {
-                    $verificationQuery->where('status', 'valid');
-                });
+            $segment = BulkMailerSegment::find($segmentId);
+
+            if ($segment) {
+                $segmentService->applySegment($query, $segment);
+            }
         }
 
         return $query
+            ->whereNotNull('email')
             ->distinct('bulk_mailer_contacts.id')
             ->count('bulk_mailer_contacts.id');
+    }
+
+    protected function configureCampaignTestMailer($smtp): void
+    {
+        Config::set('mail.mailers.bulk_mailer_campaign_test', [
+            'transport' => 'smtp',
+            'host' => $smtp->host,
+            'port' => $smtp->port,
+            'encryption' => blank($smtp->encryption) ? null : $smtp->encryption,
+            'username' => $smtp->username,
+            'password' => $smtp->decrypted_password,
+            'timeout' => 90,
+            'local_domain' => $this->resolveLocalDomain(),
+        ]);
+    }
+
+    protected function resolveLocalDomain(): string
+    {
+        $ehloDomain = env('MAIL_EHLO_DOMAIN');
+
+        if (filled($ehloDomain)) {
+            return $ehloDomain;
+        }
+
+        $appHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+
+        if (filled($appHost)) {
+            return $appHost;
+        }
+
+        return 'localhost';
     }
 
     public function getEstimatedRecipientsProperty(): int
@@ -502,10 +543,10 @@ class Index extends Component
             ->when($this->search !== '', function ($query) {
                 $query->where(function ($subQuery) {
                     $subQuery
-                        ->where('name', 'like', '%'.$this->search.'%')
-                        ->orWhere('subject', 'like', '%'.$this->search.'%')
-                        ->orWhere('subject_a', 'like', '%'.$this->search.'%')
-                        ->orWhere('subject_b', 'like', '%'.$this->search.'%');
+                        ->where('name', 'like', '%' . $this->search . '%')
+                        ->orWhere('subject', 'like', '%' . $this->search . '%')
+                        ->orWhere('subject_a', 'like', '%' . $this->search . '%')
+                        ->orWhere('subject_b', 'like', '%' . $this->search . '%');
                 });
             })
             ->when($this->statusFilter !== 'all', fn ($query) => $query->where('status', $this->statusFilter))
@@ -534,7 +575,7 @@ class Index extends Component
         return BulkMailerContactList::query()
             ->where('is_active', true)
             ->when($this->listSearch !== '', function ($query) {
-                $query->where('name', 'like', '%'.$this->listSearch.'%');
+                $query->where('name', 'like', '%' . $this->listSearch . '%');
             })
             ->orderBy('name')
             ->get();

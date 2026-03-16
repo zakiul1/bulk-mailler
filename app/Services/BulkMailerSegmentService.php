@@ -16,30 +16,34 @@ class BulkMailerSegmentService
 
         $rules = $segment->rules ?? [];
 
-        if (($rules['only_active'] ?? true) === true) {
-            $query->where('status', 'active');
-        }
-
-        if (($rules['require_verified_valid'] ?? true) === true) {
-            $query->whereHas('verification', function ($verificationQuery) {
-                $verificationQuery->where('status', 'valid');
-            });
-        }
-
-        if (($rules['exclude_unsubscribed'] ?? true) === true) {
-            $query->whereNull('unsubscribed_at');
-        }
-
-        if (($rules['exclude_bounced'] ?? true) === true) {
-            $query->whereNull('bounced_at');
-        }
-
         if (! empty($rules['list_ids']) && is_array($rules['list_ids'])) {
             $listIds = array_map('intval', $rules['list_ids']);
 
-            $query->whereHas('lists', function ($listQuery) use ($listIds) {
-                $listQuery->whereIn('bulk_mailer_contact_lists.id', $listIds);
-            });
+            $query->whereIn('bulk_mailer_contact_list_id', $listIds);
+        }
+
+        if (! empty($rules['emails']) && is_array($rules['emails'])) {
+            $emails = collect($rules['emails'])
+                ->map(fn ($email) => strtolower(trim((string) $email)))
+                ->filter()
+                ->values()
+                ->all();
+
+            if (! empty($emails)) {
+                $query->whereIn('email', $emails);
+            }
+        }
+
+        if (! empty($rules['exclude_emails']) && is_array($rules['exclude_emails'])) {
+            $excludedEmails = collect($rules['exclude_emails'])
+                ->map(fn ($email) => strtolower(trim((string) $email)))
+                ->filter()
+                ->values()
+                ->all();
+
+            if (! empty($excludedEmails)) {
+                $query->whereNotIn('email', $excludedEmails);
+            }
         }
 
         return $query;

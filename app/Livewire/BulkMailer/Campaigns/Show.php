@@ -2,6 +2,7 @@
 
 namespace App\Livewire\BulkMailer\Campaigns;
 
+use App\Enums\BulkMailerCampaignRecipientStatus;
 use App\Models\BulkMailerCampaign;
 use App\Models\BulkMailerDeliveryEvent;
 use Livewire\Component;
@@ -17,7 +18,7 @@ class Show extends Component
             'lists',
             'creator',
             'segment',
-            'recipients.contact',
+            'recipients.contact.category',
             'recipients.smtpAccount',
         ]);
     }
@@ -28,8 +29,14 @@ class Show extends Component
 
         return [
             'A' => [
-                'sent' => (clone $recipientQuery)->where('subject_variant', 'A')->where('status', 'sent')->count(),
-                'failed' => (clone $recipientQuery)->where('subject_variant', 'A')->where('status', 'failed')->count(),
+                'accepted' => (clone $recipientQuery)
+                    ->where('subject_variant', 'A')
+                    ->where('status', BulkMailerCampaignRecipientStatus::Sent->value)
+                    ->count(),
+                'failed' => (clone $recipientQuery)
+                    ->where('subject_variant', 'A')
+                    ->where('status', BulkMailerCampaignRecipientStatus::Failed->value)
+                    ->count(),
                 'opens' => BulkMailerDeliveryEvent::query()
                     ->where('bulk_mailer_campaign_id', $this->campaign->id)
                     ->where('event_type', 'open')
@@ -40,10 +47,26 @@ class Show extends Component
                     ->where('event_type', 'click')
                     ->whereHas('recipient', fn ($q) => $q->where('subject_variant', 'A'))
                     ->count(),
+                'delivered' => BulkMailerDeliveryEvent::query()
+                    ->where('bulk_mailer_campaign_id', $this->campaign->id)
+                    ->where('event_type', 'delivered')
+                    ->whereHas('recipient', fn ($q) => $q->where('subject_variant', 'A'))
+                    ->count(),
+                'bounces' => BulkMailerDeliveryEvent::query()
+                    ->where('bulk_mailer_campaign_id', $this->campaign->id)
+                    ->where('event_type', 'bounce')
+                    ->whereHas('recipient', fn ($q) => $q->where('subject_variant', 'A'))
+                    ->count(),
             ],
             'B' => [
-                'sent' => (clone $recipientQuery)->where('subject_variant', 'B')->where('status', 'sent')->count(),
-                'failed' => (clone $recipientQuery)->where('subject_variant', 'B')->where('status', 'failed')->count(),
+                'accepted' => (clone $recipientQuery)
+                    ->where('subject_variant', 'B')
+                    ->where('status', BulkMailerCampaignRecipientStatus::Sent->value)
+                    ->count(),
+                'failed' => (clone $recipientQuery)
+                    ->where('subject_variant', 'B')
+                    ->where('status', BulkMailerCampaignRecipientStatus::Failed->value)
+                    ->count(),
                 'opens' => BulkMailerDeliveryEvent::query()
                     ->where('bulk_mailer_campaign_id', $this->campaign->id)
                     ->where('event_type', 'open')
@@ -52,6 +75,16 @@ class Show extends Component
                 'clicks' => BulkMailerDeliveryEvent::query()
                     ->where('bulk_mailer_campaign_id', $this->campaign->id)
                     ->where('event_type', 'click')
+                    ->whereHas('recipient', fn ($q) => $q->where('subject_variant', 'B'))
+                    ->count(),
+                'delivered' => BulkMailerDeliveryEvent::query()
+                    ->where('bulk_mailer_campaign_id', $this->campaign->id)
+                    ->where('event_type', 'delivered')
+                    ->whereHas('recipient', fn ($q) => $q->where('subject_variant', 'B'))
+                    ->count(),
+                'bounces' => BulkMailerDeliveryEvent::query()
+                    ->where('bulk_mailer_campaign_id', $this->campaign->id)
+                    ->where('event_type', 'bounce')
                     ->whereHas('recipient', fn ($q) => $q->where('subject_variant', 'B'))
                     ->count(),
             ],
@@ -61,6 +94,12 @@ class Show extends Component
     public function getTotalsProperty(): array
     {
         return [
+            'accepted' => $this->campaign->recipients()
+                ->where('status', BulkMailerCampaignRecipientStatus::Sent->value)
+                ->count(),
+            'failed' => $this->campaign->recipients()
+                ->where('status', BulkMailerCampaignRecipientStatus::Failed->value)
+                ->count(),
             'opens' => BulkMailerDeliveryEvent::query()
                 ->where('bulk_mailer_campaign_id', $this->campaign->id)
                 ->where('event_type', 'open')

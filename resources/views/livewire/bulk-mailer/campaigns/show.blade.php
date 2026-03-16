@@ -176,14 +176,14 @@
                 </div>
 
                 <div class="mt-6">
-                    <div class="text-xs text-zinc-500 dark:text-zinc-400">Lists</div>
+                    <div class="text-xs text-zinc-500 dark:text-zinc-400">Categories</div>
                     <div class="mt-2 flex flex-wrap gap-2">
                         @forelse ($campaign->lists as $list)
                             <span class="border border-zinc-300 px-2 py-1 text-xs text-zinc-700 dark:border-zinc-700 dark:text-zinc-300">
                                 {{ $list->name }}
                             </span>
                         @empty
-                            <span class="text-xs text-zinc-500 dark:text-zinc-400">No lists</span>
+                            <span class="text-xs text-zinc-500 dark:text-zinc-400">No categories</span>
                         @endforelse
                     </div>
                 </div>
@@ -199,6 +199,7 @@
                         <thead class="bg-zinc-50 dark:bg-zinc-950">
                             <tr>
                                 <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">Recipient</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">Category</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">Variant</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">SMTP</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">Status</th>
@@ -212,9 +213,12 @@
                                 <tr>
                                     <td class="px-4 py-4 align-top">
                                         <div class="font-medium text-zinc-900 dark:text-white">
-                                            {{ $recipient->contact?->full_name ?: $recipient->email }}
+                                            {{ $recipient->email }}
                                         </div>
-                                        <div class="text-xs text-zinc-500 dark:text-zinc-400">{{ $recipient->email }}</div>
+                                    </td>
+
+                                    <td class="px-4 py-4 align-top text-sm text-zinc-900 dark:text-white">
+                                        {{ $recipient->contact?->category?->name ?: '-' }}
                                     </td>
 
                                     <td class="px-4 py-4 align-top text-sm text-zinc-900 dark:text-white">
@@ -239,7 +243,7 @@
                                 </tr>
                             @empty
                                 <tr>
-                                    <td colspan="6" class="px-4 py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">
+                                    <td colspan="7" class="px-4 py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">
                                         No recipient logs yet.
                                     </td>
                                 </tr>

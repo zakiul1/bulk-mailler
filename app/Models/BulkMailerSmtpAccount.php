@@ -24,7 +24,6 @@ class BulkMailerSmtpAccount extends Model
         'from_email',
         'reply_to_email',
         'daily_limit',
-        'priority',
         'is_active',
         'health_status',
         'notes',
@@ -40,7 +39,6 @@ class BulkMailerSmtpAccount extends Model
     protected $casts = [
         'port' => 'integer',
         'daily_limit' => 'integer',
-        'priority' => 'integer',
         'is_active' => 'boolean',
         'health_status' => BulkMailerSmtpHealthStatus::class,
         'failure_count' => 'integer',

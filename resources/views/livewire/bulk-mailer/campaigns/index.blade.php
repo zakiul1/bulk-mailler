@@ -4,7 +4,7 @@
             <div>
                 <h1 class="text-xl font-semibold text-zinc-900 dark:text-white">Campaigns</h1>
                 <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                    Create campaigns, connect templates, choose lists, assign SMTP groups, test delivery, and launch sending.
+                    Create campaigns, connect templates, choose categories, assign SMTP groups, test delivery, and launch sending.
                 </p>
             </div>
 
@@ -65,7 +65,7 @@
                         <tr>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">Campaign</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">Template</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">Lists</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">Categories</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">Status</th>
                             <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">Actions</th>
                         </tr>
@@ -119,7 +119,7 @@
                                                 {{ $list->name }}
                                             </span>
                                         @empty
-                                            <span class="text-xs text-zinc-500 dark:text-zinc-400">No lists</span>
+                                            <span class="text-xs text-zinc-500 dark:text-zinc-400">No categories</span>
                                         @endforelse
                                     </div>
                                 </td>
@@ -288,14 +288,14 @@
 
                                 <div>
                                     <div class="mb-2 flex items-center justify-between">
-                                        <label class="block text-sm font-medium text-zinc-900 dark:text-white">Select Lists</label>
+                                        <label class="block text-sm font-medium text-zinc-900 dark:text-white">Select Categories</label>
 
                                         <a
                                             href="{{ route('bulk-mailer.lists.index') }}"
                                             wire:navigate
                                             class="text-xs text-zinc-600 underline dark:text-zinc-300"
                                         >
-                                            Manage lists
+                                            Manage categories
                                         </a>
                                     </div>
 
@@ -304,7 +304,7 @@
                                             <input
                                                 type="text"
                                                 wire:model.live.debounce.300ms="listSearch"
-                                                placeholder="Search lists"
+                                                placeholder="Search categories"
                                                 class="w-full border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
                                             >
                                             <div class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
@@ -325,7 +325,7 @@
                                                 </label>
                                             @empty
                                                 <div class="px-3 py-4 text-sm text-zinc-500 dark:text-zinc-400">
-                                                    No lists found.
+                                                    No categories found.
                                                 </div>
                                             @endforelse
                                         </div>
@@ -438,7 +438,7 @@
                                         {{ number_format($this->estimatedRecipients) }}
                                     </div>
                                     <div class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                                        Only verified valid active contacts in selected lists or segment are counted.
+                                        Count is based on selected categories and optional segment rules.
                                     </div>
                                 </div>
                             </div>

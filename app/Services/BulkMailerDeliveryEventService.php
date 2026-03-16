@@ -14,10 +14,14 @@ class BulkMailerDeliveryEventService
         ?string $message = null,
         ?array $payload = null
     ): BulkMailerDeliveryEvent {
-        $contact = BulkMailerContact::where('email', strtolower(trim($email)))->first();
+        $normalizedEmail = strtolower(trim($email));
+
+        $contact = BulkMailerContact::query()
+            ->whereRaw('LOWER(email) = ?', [$normalizedEmail])
+            ->first();
 
         $recipient = BulkMailerCampaignRecipient::query()
-            ->where('email', strtolower(trim($email)))
+            ->whereRaw('LOWER(email) = ?', [$normalizedEmail])
             ->latest()
             ->first();
 
@@ -25,11 +29,11 @@ class BulkMailerDeliveryEventService
             $contact->update([
                 'status' => 'bounced',
                 'bounced_at' => now(),
-                'suppression_reason' => 'Bounce event',
+                'suppression_reason' => $message ?: 'Bounce event',
             ]);
         }
 
-        if ($recipient && $recipient->status !== BulkMailerCampaignRecipientStatus::Sent) {
+        if ($recipient) {
             $recipient->update([
                 'status' => BulkMailerCampaignRecipientStatus::Failed,
                 'error_message' => $message ?: 'Bounce event recorded.',
@@ -40,9 +44,9 @@ class BulkMailerDeliveryEventService
             'bulk_mailer_campaign_id' => $recipient?->bulk_mailer_campaign_id,
             'bulk_mailer_contact_id' => $contact?->id,
             'bulk_mailer_campaign_recipient_id' => $recipient?->id,
-            'email' => strtolower(trim($email)),
+            'email' => $normalizedEmail,
             'event_type' => 'bounce',
-            'message' => $message,
+            'message' => $message ?: 'Bounce event recorded.',
             'payload' => $payload,
             'event_at' => now(),
         ]);
@@ -54,9 +58,9 @@ class BulkMailerDeliveryEventService
             'bulk_mailer_campaign_id' => $recipient->bulk_mailer_campaign_id,
             'bulk_mailer_contact_id' => $recipient->bulk_mailer_contact_id,
             'bulk_mailer_campaign_recipient_id' => $recipient->id,
-            'email' => $recipient->email,
+            'email' => strtolower(trim((string) $recipient->email)),
             'event_type' => 'sent',
-            'message' => 'Message sent successfully.',
+            'message' => 'Message accepted by SMTP server.',
             'payload' => null,
             'event_at' => now(),
         ]);
@@ -68,9 +72,9 @@ class BulkMailerDeliveryEventService
             'bulk_mailer_campaign_id' => $recipient->bulk_mailer_campaign_id,
             'bulk_mailer_contact_id' => $recipient->bulk_mailer_contact_id,
             'bulk_mailer_campaign_recipient_id' => $recipient->id,
-            'email' => $recipient->email,
+            'email' => strtolower(trim((string) $recipient->email)),
             'event_type' => 'failed',
-            'message' => $message,
+            'message' => mb_substr($message, 0, 1000),
             'payload' => null,
             'event_at' => now(),
         ]);

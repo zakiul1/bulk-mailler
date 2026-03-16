@@ -17,6 +17,7 @@ use App\Services\BulkMailerSmtpRotationService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Mail\MailManager;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Config;
@@ -36,7 +37,8 @@ class ProcessBulkMailerCampaign implements ShouldQueue
         BulkMailerDeliveryEventService $eventService,
         BulkMailerSegmentService $segmentService,
         BulkMailerSmtpRotationService $rotationService,
-        BulkMailerSmtpHealthService $smtpHealthService
+        BulkMailerSmtpHealthService $smtpHealthService,
+        MailManager $mailManager
     ): void {
         $campaign = BulkMailerCampaign::with(['template', 'lists', 'segment', 'smtpGroup.smtpAccounts'])->find($this->campaignId);
 
@@ -57,18 +59,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
             ->get();
 
         if ($pendingRecipients->isEmpty()) {
-            $campaign->update([
-                'sent_count' => BulkMailerCampaignRecipient::query()
-                    ->where('bulk_mailer_campaign_id', $campaign->id)
-                    ->where('status', BulkMailerCampaignRecipientStatus::Sent->value)
-                    ->count(),
-                'failed_count' => BulkMailerCampaignRecipient::query()
-                    ->where('bulk_mailer_campaign_id', $campaign->id)
-                    ->where('status', BulkMailerCampaignRecipientStatus::Failed->value)
-                    ->count(),
-                'status' => BulkMailerCampaignStatus::Completed,
-                'completed_at' => now(),
-            ]);
+            $this->refreshCampaignCountsAndStatus($campaign);
 
             return;
         }
@@ -94,6 +85,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
 
                     $smtpHealthService->markFailure($smtp, 'Recipient contact record not found.');
                     $eventService->logFailed($recipient, 'Recipient contact record not found.');
+
                     continue;
                 }
 
@@ -105,24 +97,26 @@ class ProcessBulkMailerCampaign implements ShouldQueue
                         : ($campaign->subject_a ?: $subjectTemplate);
                 }
 
-                $renderedSubject = $this->replaceVariables($subjectTemplate, $recipient->contact);
+                $renderedSubject = $this->replaceVariables((string) $subjectTemplate, $recipient->contact);
 
                 $htmlSource = $campaign->template->html_content;
                 $textSource = $campaign->template->text_content;
 
-                $htmlBody = filled($htmlSource)
+                $renderedHtml = filled($htmlSource)
                     ? $this->replaceVariables($htmlSource, $recipient->contact)
-                    : nl2br(e($this->replaceVariables($textSource ?: '', $recipient->contact)));
+                    : '';
 
-                Config::set('mail.mailers.bulk_mailer_campaign', [
-                    'transport' => 'smtp',
-                    'host' => $smtp->host,
-                    'port' => $smtp->port,
-                    'encryption' => blank($smtp->encryption) ? null : $smtp->encryption,
-                    'username' => $smtp->username,
-                    'password' => $smtp->decrypted_password,
-                    'timeout' => 30,
-                ]);
+                $renderedText = filled($textSource)
+                    ? $this->replaceVariables($textSource, $recipient->contact)
+                    : '';
+
+                if (! filled($renderedHtml) && filled($renderedText)) {
+                    $renderedHtml = nl2br(e($renderedText));
+                }
+
+                $this->configureCampaignMailer($smtp);
+
+                $mailManager->purge('bulk_mailer_campaign');
 
                 Mail::mailer('bulk_mailer_campaign')
                     ->to($recipient->email)
@@ -131,7 +125,8 @@ class ProcessBulkMailerCampaign implements ShouldQueue
                         campaign: $campaign,
                         contact: $recipient->contact,
                         subjectLine: $renderedSubject,
-                        htmlBody: $htmlBody
+                        htmlBody: $renderedHtml,
+                        textBody: filled($renderedText) ? $renderedText : null,
                     ));
 
                 $recipient->update([
@@ -153,51 +148,38 @@ class ProcessBulkMailerCampaign implements ShouldQueue
 
                 $smtpHealthService->markFailure($smtp, mb_substr($e->getMessage(), 0, 1000));
                 $eventService->logFailed($recipient, mb_substr($e->getMessage(), 0, 1000));
+            } finally {
+                $mailManager->purge('bulk_mailer_campaign');
             }
         }
 
-        $hasPending = BulkMailerCampaignRecipient::query()
-            ->where('bulk_mailer_campaign_id', $campaign->id)
-            ->where('status', BulkMailerCampaignRecipientStatus::Pending->value)
-            ->exists();
-
-        $campaign->update([
-            'sent_count' => BulkMailerCampaignRecipient::query()
-                ->where('bulk_mailer_campaign_id', $campaign->id)
-                ->where('status', BulkMailerCampaignRecipientStatus::Sent->value)
-                ->count(),
-            'failed_count' => BulkMailerCampaignRecipient::query()
-                ->where('bulk_mailer_campaign_id', $campaign->id)
-                ->where('status', BulkMailerCampaignRecipientStatus::Failed->value)
-                ->count(),
-            'status' => $hasPending ? BulkMailerCampaignStatus::Paused : BulkMailerCampaignStatus::Completed,
-            'completed_at' => $hasPending ? null : now(),
-        ]);
+        $this->refreshCampaignCountsAndStatus($campaign);
     }
 
     protected function syncRecipients(BulkMailerCampaign $campaign, BulkMailerSegmentService $segmentService): void
     {
         $listIds = $campaign->lists->pluck('id')->all();
+
         $query = BulkMailerContact::query();
 
         if (! empty($listIds)) {
-            $query->whereHas('lists', function ($listQuery) use ($listIds) {
-                $listQuery->whereIn('bulk_mailer_contact_lists.id', $listIds);
-            });
+            $query->whereIn('bulk_mailer_contact_list_id', $listIds);
         }
 
         if ($campaign->bulk_mailer_segment_id) {
-            $segmentService->applySegment($query, BulkMailerSegment::find($campaign->bulk_mailer_segment_id));
-        } else {
-            $query->where('status', 'active')
-                ->whereNull('unsubscribed_at')
-                ->whereNull('bounced_at')
-                ->whereHas('verification', function ($verificationQuery) {
-                    $verificationQuery->where('status', 'valid');
-                });
+            $segment = BulkMailerSegment::find($campaign->bulk_mailer_segment_id);
+
+            if ($segment) {
+                $segmentService->applySegment($query, $segment);
+            }
         }
 
-        $contacts = $query->get()->unique('id')->values();
+        $contacts = $query
+            ->whereNotNull('email')
+            ->get()
+            ->filter(fn (BulkMailerContact $contact) => filled($contact->email))
+            ->unique('id')
+            ->values();
 
         foreach ($contacts as $index => $contact) {
             BulkMailerCampaignRecipient::updateOrCreate(
@@ -239,11 +221,76 @@ class ProcessBulkMailerCampaign implements ShouldQueue
 
     protected function replaceVariables(string $content, BulkMailerContact $contact): string
     {
+        $firstName = $this->getContactAttribute($contact, 'first_name');
+        $lastName = $this->getContactAttribute($contact, 'last_name');
+
+        $fullName = trim(implode(' ', array_filter([$firstName, $lastName])));
+        $name = filled($fullName) ? $fullName : $contact->email;
+
         return strtr($content, [
-            '{{name}}' => $contact->full_name ?: $contact->email,
-            '{{email}}' => $contact->email,
-            '{{first_name}}' => $contact->first_name ?: '',
-            '{{last_name}}' => $contact->last_name ?: '',
+            '{{name}}' => $name,
+            '{{email}}' => (string) $contact->email,
+            '{{first_name}}' => $firstName,
+            '{{last_name}}' => $lastName,
+        ]);
+    }
+
+    protected function getContactAttribute(BulkMailerContact $contact, string $key): string
+    {
+        $value = data_get($contact, $key);
+
+        return is_string($value) ? $value : '';
+    }
+
+    protected function configureCampaignMailer($smtp): void
+    {
+        Config::set('mail.mailers.bulk_mailer_campaign', [
+            'transport' => 'smtp',
+            'host' => $smtp->host,
+            'port' => $smtp->port,
+            'encryption' => blank($smtp->encryption) ? null : $smtp->encryption,
+            'username' => $smtp->username,
+            'password' => $smtp->decrypted_password,
+            'timeout' => 90,
+            'local_domain' => $this->resolveLocalDomain(),
+        ]);
+    }
+
+    protected function resolveLocalDomain(): string
+    {
+        $ehloDomain = env('MAIL_EHLO_DOMAIN');
+
+        if (filled($ehloDomain)) {
+            return $ehloDomain;
+        }
+
+        $appHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+
+        if (filled($appHost)) {
+            return $appHost;
+        }
+
+        return 'localhost';
+    }
+
+    protected function refreshCampaignCountsAndStatus(BulkMailerCampaign $campaign): void
+    {
+        $hasPending = BulkMailerCampaignRecipient::query()
+            ->where('bulk_mailer_campaign_id', $campaign->id)
+            ->where('status', BulkMailerCampaignRecipientStatus::Pending->value)
+            ->exists();
+
+        $campaign->update([
+            'sent_count' => BulkMailerCampaignRecipient::query()
+                ->where('bulk_mailer_campaign_id', $campaign->id)
+                ->where('status', BulkMailerCampaignRecipientStatus::Sent->value)
+                ->count(),
+            'failed_count' => BulkMailerCampaignRecipient::query()
+                ->where('bulk_mailer_campaign_id', $campaign->id)
+                ->where('status', BulkMailerCampaignRecipientStatus::Failed->value)
+                ->count(),
+            'status' => $hasPending ? BulkMailerCampaignStatus::Paused : BulkMailerCampaignStatus::Completed,
+            'completed_at' => $hasPending ? null : now(),
         ]);
     }
 }

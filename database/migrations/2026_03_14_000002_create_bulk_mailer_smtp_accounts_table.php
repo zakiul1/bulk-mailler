@@ -20,13 +20,12 @@ return new class extends Migration
             $table->string('from_email');
             $table->string('reply_to_email')->nullable();
             $table->unsignedInteger('daily_limit')->default(500);
-            $table->unsignedInteger('priority')->default(1);
             $table->boolean('is_active')->default(true);
             $table->string('health_status', 30)->default('unknown');
             $table->text('notes')->nullable();
             $table->timestamps();
 
-            $table->index(['is_active', 'priority']);
+            $table->index('is_active');
             $table->index('health_status');
             $table->index('from_email');
         });

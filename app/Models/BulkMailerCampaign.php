@@ -74,6 +74,16 @@ class BulkMailerCampaign extends Model
         )->withTimestamps();
     }
 
+    public function categories(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            BulkMailerContactList::class,
+            'bulk_mailer_campaign_list_items',
+            'bulk_mailer_campaign_id',
+            'bulk_mailer_contact_list_id'
+        )->withTimestamps();
+    }
+
     public function recipients(): HasMany
     {
         return $this->hasMany(BulkMailerCampaignRecipient::class, 'bulk_mailer_campaign_id');

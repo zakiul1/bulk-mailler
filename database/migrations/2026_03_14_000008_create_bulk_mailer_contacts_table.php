@@ -10,16 +10,23 @@ return new class extends Migration
     {
         Schema::create('bulk_mailer_contacts', function (Blueprint $table) {
             $table->id();
-            $table->string('email')->unique();
-            $table->string('first_name')->nullable();
-            $table->string('last_name')->nullable();
-            $table->string('status', 30)->default('active');
-            $table->text('notes')->nullable();
-            $table->timestamp('last_verified_at')->nullable();
+            $table->foreignId('bulk_mailer_contact_list_id')
+                ->constrained('bulk_mailer_contact_lists')
+                ->cascadeOnDelete();
+
+            $table->string('email');
             $table->timestamps();
 
-            $table->index('status', 'bm_contacts_status_idx');
+            $table->unique(
+                ['bulk_mailer_contact_list_id', 'email'],
+                'bm_contacts_list_email_unique'
+            );
+
             $table->index('email', 'bm_contacts_email_idx');
+            $table->index(
+                ['bulk_mailer_contact_list_id', 'created_at'],
+                'bm_contacts_list_created_idx'
+            );
         });
     }
 

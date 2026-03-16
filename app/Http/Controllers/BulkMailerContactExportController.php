@@ -9,10 +9,10 @@ class BulkMailerContactExportController extends Controller
 {
     public function __invoke(): StreamedResponse
     {
-        $fileName = 'bulk-mailer-contacts-'.now()->format('Y-m-d-H-i-s').'.csv';
+        $fileName = 'bulk-mailer-contacts-' . now()->format('Y-m-d-H-i-s') . '.csv';
 
         $contacts = BulkMailerContact::query()
-            ->with(['lists', 'verification'])
+            ->with('category')
             ->orderBy('email')
             ->get();
 
@@ -21,27 +21,15 @@ class BulkMailerContactExportController extends Controller
 
             fputcsv($handle, [
                 'email',
-                'first_name',
-                'last_name',
-                'status',
-                'verification_status',
-                'unsubscribed_at',
-                'bounced_at',
-                'notes',
-                'lists',
+                'category',
+                'created_at',
             ]);
 
             foreach ($contacts as $contact) {
                 fputcsv($handle, [
                     $contact->email,
-                    $contact->first_name,
-                    $contact->last_name,
-                    $contact->status?->value ?? $contact->status,
-                    $contact->verification_status,
-                    optional($contact->unsubscribed_at)?->format('Y-m-d H:i:s'),
-                    optional($contact->bounced_at)?->format('Y-m-d H:i:s'),
-                    $contact->notes,
-                    $contact->lists->pluck('name')->implode('|'),
+                    $contact->category?->name,
+                    optional($contact->created_at)?->format('Y-m-d H:i:s'),
                 ]);
             }
 

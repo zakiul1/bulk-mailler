@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class BulkMailerContactList extends Model
@@ -21,14 +22,9 @@ class BulkMailerContactList extends Model
         'is_active' => 'boolean',
     ];
 
-    public function contacts(): BelongsToMany
+    public function contacts(): HasMany
     {
-        return $this->belongsToMany(
-            BulkMailerContact::class,
-            'bulk_mailer_contact_list_items',
-            'bulk_mailer_contact_list_id',
-            'bulk_mailer_contact_id'
-        )->withTimestamps();
+        return $this->hasMany(BulkMailerContact::class, 'bulk_mailer_contact_list_id');
     }
 
     public function campaigns(): BelongsToMany

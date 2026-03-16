@@ -2,190 +2,65 @@
 
 namespace App\Livewire\BulkMailer\Contacts;
 
-use App\Enums\BulkMailerContactStatus;
+use App\Jobs\ProcessBulkMailerContactDelete;
 use App\Models\BulkMailerContact;
+use App\Models\BulkMailerContactDeleteJob;
 use App\Models\BulkMailerContactList;
-use App\Services\BulkMailerContactCsvImportService;
-use Illuminate\Validation\Rule;
+use Illuminate\Database\Eloquent\Builder;
 use Livewire\Component;
-use Livewire\WithFileUploads;
 use Livewire\WithPagination;
 
 class Index extends Component
 {
     use WithPagination;
-    use WithFileUploads;
 
     public string $search = '';
-    public string $statusFilter = 'all';
     public string $listFilter = 'all';
 
-    public bool $showFormModal = false;
     public bool $showDeleteModal = false;
-    public bool $showImportModal = false;
+    public bool $showBulkDeleteModal = false;
 
-    public ?int $editingId = null;
     public ?int $deleteId = null;
 
-    public string $email = '';
-    public string $first_name = '';
-    public string $last_name = '';
-    public string $status = 'active';
-    public string $notes = '';
-    public array $selected_lists = [];
+    public array $selected = [];
+    public bool $selectAllMatching = false;
 
-    public $import_file = null;
-    public array $import_list_ids = [];
-    public array $lastImportSummary = [];
+    public string $copiedContactsText = '';
+    public ?int $latestDeleteJobId = null;
 
     protected $queryString = [
         'search' => ['except' => ''],
-        'statusFilter' => ['except' => 'all'],
         'listFilter' => ['except' => 'all'],
     ];
+
+    public function mount(): void
+    {
+        $this->latestDeleteJobId = null;
+    }
 
     public function updatingSearch(): void
     {
         $this->resetPage();
-    }
-
-    public function updatingStatusFilter(): void
-    {
-        $this->resetPage();
+        $this->resetSelection();
     }
 
     public function updatingListFilter(): void
     {
         $this->resetPage();
+        $this->resetSelection();
     }
 
-    public function create(): void
+    public function updatedSelectAllMatching(bool $value): void
     {
-        $this->resetForm();
-        $this->showFormModal = true;
-    }
-
-    public function openImportModal(): void
-    {
-        $this->showImportModal = true;
-        $this->import_file = null;
-        $this->import_list_ids = [];
-        $this->lastImportSummary = [];
-        $this->resetValidation();
-    }
-
-    public function importCsv(BulkMailerContactCsvImportService $service): void
-    {
-        $validated = $this->validate([
-            'import_file' => ['required', 'file', 'mimes:csv,txt'],
-            'import_list_ids' => ['nullable', 'array'],
-            'import_list_ids.*' => ['integer', 'exists:bulk_mailer_contact_lists,id'],
-        ], [
-            'import_file.required' => 'CSV file is required.',
-            'import_file.file' => 'Upload a valid file.',
-            'import_file.mimes' => 'Only CSV files are allowed.',
-        ]);
-
-        $summary = $service->import(
-            $validated['import_file'],
-            $validated['import_list_ids'] ?? []
-        );
-
-        $this->lastImportSummary = $summary;
-        $this->showImportModal = false;
-        $this->import_file = null;
-        $this->import_list_ids = [];
-
-        session()->flash(
-            'success',
-            "Import completed. Total: {$summary['total']}, Created: {$summary['created']}, Updated: {$summary['updated']}, Invalid: {$summary['invalid']}."
-        );
-    }
-
-    public function edit(int $id): void
-    {
-        $contact = BulkMailerContact::with('lists')->findOrFail($id);
-
-        $this->editingId = $contact->id;
-        $this->email = $contact->email;
-        $this->first_name = $contact->first_name ?? '';
-        $this->last_name = $contact->last_name ?? '';
-        $this->status = $contact->status?->value ?? 'active';
-        $this->notes = $contact->notes ?? '';
-        $this->selected_lists = $contact->lists->pluck('id')->map(fn ($id) => (string) $id)->all();
-
-        $this->resetValidation();
-        $this->showFormModal = true;
-    }
-
-    public function save(): void
-    {
-        $validated = $this->validate($this->rules(), $this->messages());
-
-        $status = $validated['status'];
-
-        $payload = [
-            'email' => strtolower(trim($validated['email'])),
-            'first_name' => $validated['first_name'] ?: null,
-            'last_name' => $validated['last_name'] ?: null,
-            'status' => $status,
-            'notes' => $validated['notes'] ?: null,
-            'unsubscribed_at' => $status === 'unsubscribed' ? now() : null,
-            'bounced_at' => in_array($status, ['bounced', 'suppressed'], true) ? now() : null,
-        ];
-
-        if ($this->editingId) {
-            $contact = BulkMailerContact::findOrFail($this->editingId);
-            $contact->update($payload);
-            $message = 'Contact updated successfully.';
-        } else {
-            $contact = BulkMailerContact::create($payload);
-            $message = 'Contact created successfully.';
+        if (! $value) {
+            $this->selected = [];
+            return;
         }
 
-        $contact->lists()->sync($validated['selected_lists'] ?? []);
-
-        $this->showFormModal = false;
-        $this->resetForm();
-
-        session()->flash('success', $message);
-    }
-
-    public function markUnsubscribed(int $id): void
-    {
-        $contact = BulkMailerContact::findOrFail($id);
-
-        $contact->update([
-            'status' => 'unsubscribed',
-            'unsubscribed_at' => now(),
-        ]);
-
-        session()->flash('success', 'Contact marked as unsubscribed.');
-    }
-
-    public function markBounced(int $id): void
-    {
-        $contact = BulkMailerContact::findOrFail($id);
-
-        $contact->update([
-            'status' => 'bounced',
-            'bounced_at' => now(),
-        ]);
-
-        session()->flash('success', 'Contact marked as bounced.');
-    }
-
-    public function reactivate(int $id): void
-    {
-        $contact = BulkMailerContact::findOrFail($id);
-
-        $contact->update([
-            'status' => 'active',
-            'unsubscribed_at' => null,
-            'bounced_at' => null,
-        ]);
-
-        session()->flash('success', 'Contact reactivated.');
+        $this->selected = $this->filteredQuery()
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->all();
     }
 
     public function confirmDelete(int $id): void
@@ -197,81 +72,163 @@ class Index extends Component
     public function delete(): void
     {
         $contact = BulkMailerContact::findOrFail($this->deleteId);
-        $contact->delete();
+
+        $deleteJob = BulkMailerContactDeleteJob::create([
+            'bulk_mailer_contact_list_id' => $contact->bulk_mailer_contact_list_id,
+            'status' => 'queued',
+            'selection_type' => 'selected',
+            'filters' => [
+                'ids' => [$contact->id],
+                'search' => $this->search,
+                'list_id' => $this->listFilter,
+            ],
+            'created_by' => auth()->id(),
+        ]);
+
+        $this->latestDeleteJobId = $deleteJob->id;
+
+        ProcessBulkMailerContactDelete::dispatch($deleteJob->id);
 
         $this->showDeleteModal = false;
         $this->deleteId = null;
+        $this->resetSelection();
+        $this->resetPage();
 
-        session()->flash('success', 'Contact deleted successfully.');
+        session()->flash('success', 'Delete started.');
+        $this->dispatch('notify', type: 'success', message: 'Delete started.');
+    }
+
+    public function confirmBulkDelete(): void
+    {
+        if (empty($this->selected)) {
+            session()->flash('error', 'Please select at least one contact.');
+            $this->dispatch('notify', type: 'error', message: 'Please select at least one contact.');
+            return;
+        }
+
+        $this->showBulkDeleteModal = true;
+    }
+
+    public function bulkDelete(): void
+    {
+        $ids = collect($this->selected)
+            ->map(fn ($id) => (int) $id)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        if (empty($ids)) {
+            $this->showBulkDeleteModal = false;
+            session()->flash('error', 'No valid contacts selected.');
+            $this->dispatch('notify', type: 'error', message: 'No valid contacts selected.');
+            return;
+        }
+
+        $deleteJob = BulkMailerContactDeleteJob::create([
+            'bulk_mailer_contact_list_id' => $this->listFilter !== 'all' ? (int) $this->listFilter : null,
+            'status' => 'queued',
+            'selection_type' => 'selected',
+            'filters' => [
+                'ids' => $ids,
+                'search' => $this->search,
+                'list_id' => $this->listFilter,
+            ],
+            'created_by' => auth()->id(),
+        ]);
+
+        $this->latestDeleteJobId = $deleteJob->id;
+
+        ProcessBulkMailerContactDelete::dispatch($deleteJob->id);
+
+        $this->showBulkDeleteModal = false;
+        $this->resetSelection();
+        $this->resetPage();
+
+        session()->flash('success', 'Bulk delete started.');
+        $this->dispatch('notify', type: 'success', message: 'Bulk delete started.');
+    }
+
+    public function copySelected(): void
+    {
+        $ids = collect($this->selected)
+            ->map(fn ($id) => (int) $id)
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($ids->isEmpty()) {
+            session()->flash('error', 'Please select at least one contact to copy.');
+            $this->dispatch('notify', type: 'error', message: 'Please select at least one contact to copy.');
+            return;
+        }
+
+        $emails = BulkMailerContact::query()
+            ->whereIn('id', $ids)
+            ->orderBy('email')
+            ->pluck('email')
+            ->all();
+
+        $this->copiedContactsText = implode(PHP_EOL, $emails);
+
+        $this->dispatch('copy-contacts', text: $this->copiedContactsText);
+        $this->dispatch('notify', type: 'success', message: count($emails) . ' contact(s) copied.');
+    }
+
+    public function pollDeleteJob(): void
+    {
+        // Keep section visible during polling.
+        // Do not clear completed/failed job automatically.
+    }
+
+    public function clearDeleteJob(): void
+    {
+        if (! $this->latestDeleteJobId) {
+            return;
+        }
+
+        $job = BulkMailerContactDeleteJob::find($this->latestDeleteJobId);
+
+        if (! $job) {
+            $this->latestDeleteJobId = null;
+            return;
+        }
+
+        if (in_array($job->status, ['completed', 'failed'], true)) {
+            $this->latestDeleteJobId = null;
+        }
     }
 
     public function closeModals(): void
     {
-        $this->showFormModal = false;
         $this->showDeleteModal = false;
-        $this->showImportModal = false;
+        $this->showBulkDeleteModal = false;
         $this->deleteId = null;
-        $this->resetValidation();
     }
 
-    protected function resetForm(): void
+    protected function resetSelection(): void
     {
-        $this->editingId = null;
-        $this->email = '';
-        $this->first_name = '';
-        $this->last_name = '';
-        $this->status = 'active';
-        $this->notes = '';
-        $this->selected_lists = [];
-        $this->resetValidation();
+        $this->selected = [];
+        $this->selectAllMatching = false;
     }
 
-    protected function rules(): array
+    protected function filteredQuery(): Builder
     {
-        return [
-            'email' => [
-                'required',
-                'email:rfc,dns',
-                'max:255',
-                Rule::unique('bulk_mailer_contacts', 'email')->ignore($this->editingId),
-            ],
-            'first_name' => ['nullable', 'string', 'max:255'],
-            'last_name' => ['nullable', 'string', 'max:255'],
-            'status' => ['required', Rule::in(array_column(BulkMailerContactStatus::cases(), 'value'))],
-            'notes' => ['nullable', 'string'],
-            'selected_lists' => ['nullable', 'array'],
-            'selected_lists.*' => ['integer', 'exists:bulk_mailer_contact_lists,id'],
-        ];
-    }
-
-    protected function messages(): array
-    {
-        return [
-            'email.required' => 'Email is required.',
-            'email.email' => 'Enter a valid email address.',
-            'email.unique' => 'This email already exists.',
-            'status.required' => 'Status is required.',
-        ];
+        return BulkMailerContact::query()
+            ->when($this->search !== '', function (Builder $query) {
+                $query->where('email', 'like', '%' . $this->search . '%');
+            })
+            ->when($this->listFilter !== 'all', function (Builder $query) {
+                $query->where('bulk_mailer_contact_list_id', (int) $this->listFilter);
+            });
     }
 
     public function getRowsProperty()
     {
-        return BulkMailerContact::query()
-            ->with(['lists', 'verification'])
-            ->when($this->search !== '', function ($query) {
-                $query->where(function ($subQuery) {
-                    $subQuery
-                        ->where('email', 'like', '%'.$this->search.'%')
-                        ->orWhere('first_name', 'like', '%'.$this->search.'%')
-                        ->orWhere('last_name', 'like', '%'.$this->search.'%');
-                });
-            })
-            ->when($this->statusFilter !== 'all', fn ($query) => $query->where('status', $this->statusFilter))
-            ->when($this->listFilter !== 'all', function ($query) {
-                $query->whereHas('lists', fn ($subQuery) => $subQuery->where('bulk_mailer_contact_lists.id', $this->listFilter));
-            })
+        return $this->filteredQuery()
+            ->with('category')
             ->latest()
-            ->paginate(10);
+            ->paginate(20);
     }
 
     public function getListsProperty()
@@ -280,6 +237,22 @@ class Index extends Component
             ->where('is_active', true)
             ->orderBy('name')
             ->get();
+    }
+
+    public function getSelectedCountProperty(): int
+    {
+        return count($this->selected);
+    }
+
+    public function getLatestDeleteJobProperty(): ?BulkMailerContactDeleteJob
+    {
+        if ($this->latestDeleteJobId) {
+            return BulkMailerContactDeleteJob::query()
+                ->with('category')
+                ->find($this->latestDeleteJobId);
+        }
+
+        return null;
     }
 
     public function render()

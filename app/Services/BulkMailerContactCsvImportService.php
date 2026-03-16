@@ -14,22 +14,10 @@ class BulkMailerContactCsvImportService
         $handle = fopen($file->getRealPath(), 'r');
 
         if (! $handle) {
-            return [
-                'total' => 0,
-                'created' => 0,
-                'updated' => 0,
-                'skipped' => 0,
-                'invalid' => 0,
-            ];
+            return $this->emptySummary();
         }
 
-        $summary = [
-            'total' => 0,
-            'created' => 0,
-            'updated' => 0,
-            'skipped' => 0,
-            'invalid' => 0,
-        ];
+        $summary = $this->emptySummary();
 
         $header = fgetcsv($handle);
 
@@ -44,7 +32,14 @@ class BulkMailerContactCsvImportService
             ->values()
             ->all();
 
-        DB::transaction(function () use ($handle, $header, $listIds, &$summary) {
+        $normalizedListIds = collect($listIds)
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        DB::transaction(function () use ($handle, $header, $normalizedListIds, &$summary) {
             while (($row = fgetcsv($handle)) !== false) {
                 $summary['total']++;
 
@@ -57,14 +52,7 @@ class BulkMailerContactCsvImportService
                     continue;
                 }
 
-                $status = strtolower(trim((string) ($rowData['status'] ?? 'active')));
-                $allowedStatuses = ['active', 'unsubscribed', 'bounced', 'suppressed'];
-
-                if (! in_array($status, $allowedStatuses, true)) {
-                    $status = BulkMailerContactStatus::Active->value;
-                }
-
-                $existing = BulkMailerContact::where('email', $email)->first();
+                $status = $this->normalizeStatus($rowData['status'] ?? null);
 
                 $payload = [
                     'email' => $email,
@@ -72,21 +60,21 @@ class BulkMailerContactCsvImportService
                     'last_name' => $this->nullableString($rowData['last_name'] ?? null),
                     'status' => $status,
                     'notes' => $this->nullableString($rowData['notes'] ?? null),
-                    'unsubscribed_at' => $status === 'unsubscribed' ? now() : null,
-                    'bounced_at' => in_array($status, ['bounced', 'suppressed'], true) ? now() : null,
+                    'unsubscribed_at' => $status === BulkMailerContactStatus::Unsubscribed->value ? now() : null,
+                    'bounced_at' => in_array($status, [
+                        BulkMailerContactStatus::Bounced->value,
+                        BulkMailerContactStatus::Suppressed->value,
+                    ], true) ? now() : null,
+                    'suppression_reason' => $this->resolveSuppressionReason($status, $rowData),
                 ];
 
-                if ($existing) {
-                    $existing->update($payload);
-                    $contact = $existing;
-                    $summary['updated']++;
-                } else {
-                    $contact = BulkMailerContact::create($payload);
-                    $summary['created']++;
+                if (empty($normalizedListIds)) {
+                    $this->upsertContactForList(null, $payload, $summary);
+                    continue;
                 }
 
-                if (! empty($listIds)) {
-                    $contact->lists()->syncWithoutDetaching($listIds);
+                foreach ($normalizedListIds as $listId) {
+                    $this->upsertContactForList($listId, $payload, $summary);
                 }
             }
         });
@@ -94,6 +82,68 @@ class BulkMailerContactCsvImportService
         fclose($handle);
 
         return $summary;
+    }
+
+    protected function upsertContactForList(?int $listId, array $payload, array &$summary): void
+    {
+        $query = BulkMailerContact::query()
+            ->where('email', $payload['email']);
+
+        if ($listId) {
+            $query->where('bulk_mailer_contact_list_id', $listId);
+        } else {
+            $query->whereNull('bulk_mailer_contact_list_id');
+        }
+
+        $existing = $query->first();
+
+        $attributes = array_merge($payload, [
+            'bulk_mailer_contact_list_id' => $listId,
+        ]);
+
+        if ($existing) {
+            $existing->update($attributes);
+            $summary['updated']++;
+
+            return;
+        }
+
+        BulkMailerContact::create($attributes);
+        $summary['created']++;
+    }
+
+    protected function normalizeStatus(mixed $value): string
+    {
+        $status = strtolower(trim((string) $value));
+
+        $allowedStatuses = [
+            BulkMailerContactStatus::Active->value,
+            BulkMailerContactStatus::Unsubscribed->value,
+            BulkMailerContactStatus::Bounced->value,
+            BulkMailerContactStatus::Suppressed->value,
+        ];
+
+        if (! in_array($status, $allowedStatuses, true)) {
+            return BulkMailerContactStatus::Active->value;
+        }
+
+        return $status;
+    }
+
+    protected function resolveSuppressionReason(string $status, array $rowData): ?string
+    {
+        $csvReason = $this->nullableString($rowData['suppression_reason'] ?? null);
+
+        if ($csvReason) {
+            return $csvReason;
+        }
+
+        return match ($status) {
+            BulkMailerContactStatus::Unsubscribed->value => 'Imported as unsubscribed',
+            BulkMailerContactStatus::Bounced->value => 'Imported as bounced',
+            BulkMailerContactStatus::Suppressed->value => 'Imported as suppressed',
+            default => null,
+        };
     }
 
     protected function mapRow(array $header, array $row): array
@@ -112,5 +162,16 @@ class BulkMailerContactCsvImportService
         $value = trim((string) $value);
 
         return $value === '' ? null : $value;
+    }
+
+    protected function emptySummary(): array
+    {
+        return [
+            'total' => 0,
+            'created' => 0,
+            'updated' => 0,
+            'skipped' => 0,
+            'invalid' => 0,
+        ];
     }
 }

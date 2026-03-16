@@ -17,6 +17,7 @@ class BulkMailerPublicUnsubscribeController extends Controller
         return view('bulk-mailer.public.unsubscribe', [
             'campaign' => $campaign,
             'contact' => $contact,
+            'alreadyUnsubscribed' => ! is_null($contact->unsubscribed_at),
         ]);
     }
 
@@ -24,19 +25,21 @@ class BulkMailerPublicUnsubscribeController extends Controller
     {
         abort_unless($request->hasValidSignature(), 403);
 
-        $contact->update([
-            'status' => 'unsubscribed',
-            'unsubscribed_at' => now(),
-            'suppression_reason' => 'Public unsubscribe link',
-        ]);
+        if (is_null($contact->unsubscribed_at)) {
+            $contact->update([
+                'status' => 'unsubscribed',
+                'unsubscribed_at' => now(),
+                'suppression_reason' => 'Public unsubscribe link',
+            ]);
+        }
 
-        return redirect()
-            ->route('bulk-mailer.public.unsubscribe.show', [
-                'campaign' => $campaign,
-                'contact' => $contact,
-                'signature' => $request->query('signature'),
-                'expires' => $request->query('expires'),
-            ])
-            ->with('success', 'You have been unsubscribed successfully.');
+        return redirect()->signedRoute(
+            'bulk-mailer.public.unsubscribe.show',
+            [
+                'campaign' => $campaign->id,
+                'contact' => $contact->id,
+            ],
+            now()->addMinutes(10)
+        )->with('success', 'You have been unsubscribed successfully.');
     }
 }

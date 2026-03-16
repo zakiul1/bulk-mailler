@@ -32,13 +32,8 @@ class BulkMailerSmtpRotationService
             'random' => $this->resolveRandom($available),
             'round_robin' => $this->resolveRoundRobin($group, $available),
             'least_used' => $this->resolveLeastUsed($available),
-            default => $this->resolvePriority($available),
+            default => $this->resolveRandom($available),
         };
-    }
-
-    protected function resolvePriority(Collection $available): ?BulkMailerSmtpAccount
-    {
-        return $available->sortBy('priority')->first();
     }
 
     protected function resolveRandom(Collection $available): ?BulkMailerSmtpAccount
@@ -51,14 +46,14 @@ class BulkMailerSmtpRotationService
         return $available
             ->sortBy([
                 fn (BulkMailerSmtpAccount $smtp) => $smtp->sent_today,
-                fn (BulkMailerSmtpAccount $smtp) => $smtp->priority,
+                fn (BulkMailerSmtpAccount $smtp) => $smtp->id,
             ])
             ->first();
     }
 
     protected function resolveRoundRobin(BulkMailerSmtpGroup $group, Collection $available): ?BulkMailerSmtpAccount
     {
-        $ordered = $available->sortBy('priority')->values();
+        $ordered = $available->sortBy('id')->values();
 
         if (blank($group->last_used_smtp_account_id)) {
             $selected = $ordered->first();

@@ -2,67 +2,56 @@
 
 namespace App\Models;
 
-use App\Enums\BulkMailerContactStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class BulkMailerContact extends Model
 {
     use HasFactory;
 
     protected $fillable = [
+        'bulk_mailer_contact_list_id',
         'email',
         'first_name',
         'last_name',
         'status',
-        'notes',
-        'last_verified_at',
         'unsubscribed_at',
         'bounced_at',
         'suppression_reason',
+        'notes',
     ];
 
     protected $casts = [
-        'status' => BulkMailerContactStatus::class,
-        'last_verified_at' => 'datetime',
+        'bulk_mailer_contact_list_id' => 'integer',
         'unsubscribed_at' => 'datetime',
         'bounced_at' => 'datetime',
     ];
 
-    public function lists(): BelongsToMany
+    public function category(): BelongsTo
     {
-        return $this->belongsToMany(
-            BulkMailerContactList::class,
-            'bulk_mailer_contact_list_items',
-            'bulk_mailer_contact_id',
-            'bulk_mailer_contact_list_id'
-        )->withTimestamps();
+        return $this->belongsTo(BulkMailerContactList::class, 'bulk_mailer_contact_list_id');
     }
 
-    public function verification(): HasOne
+    public function list(): BelongsTo
     {
-        return $this->hasOne(BulkMailerEmailVerification::class, 'bulk_mailer_contact_id');
+        return $this->belongsTo(BulkMailerContactList::class, 'bulk_mailer_contact_list_id');
     }
 
-    public function getFullNameAttribute(): string
+    public function getNameAttribute(): string
     {
-        return trim(($this->first_name ?? '').' '.($this->last_name ?? ''));
+        $fullName = trim(implode(' ', array_filter([
+            $this->first_name,
+            $this->last_name,
+        ])));
+
+        return $fullName !== '' ? $fullName : (string) $this->email;
     }
 
-    public function getVerificationStatusAttribute(): string
+    public function isSuppressed(): bool
     {
-        return $this->verification?->status?->value
-            ?? $this->verification?->status
-            ?? 'pending';
-    }
-
-    public function getCanReceiveCampaignsAttribute(): bool
-    {
-        return $this->status?->value === 'active'
-            && blank($this->unsubscribed_at)
-            && blank($this->bounced_at)
-            && $this->verification_status === 'valid';
+        return ! is_null($this->unsubscribed_at)
+            || ! is_null($this->bounced_at)
+            || filled($this->suppression_reason);
     }
 }

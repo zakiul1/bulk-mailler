@@ -147,7 +147,6 @@
                                     wire:model.defer="rotation_mode"
                                     class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
                                 >
-                                    <option value="priority">Priority</option>
                                     <option value="random">Random</option>
                                     <option value="round_robin">Round Robin</option>
                                     <option value="least_used">Least Used Today</option>
@@ -163,7 +162,7 @@
                                         <label class="flex items-center gap-3 border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700">
                                             <input type="checkbox" wire:model.defer="selected_smtp_accounts" value="{{ $smtp->id }}">
                                             <span class="text-zinc-900 dark:text-white">
-                                                {{ $smtp->name }} (Priority: {{ $smtp->priority }})
+                                                {{ $smtp->name }}
                                             </span>
                                         </label>
                                     @endforeach

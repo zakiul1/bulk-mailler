@@ -102,9 +102,6 @@
                                     <div class="text-xs text-zinc-500 dark:text-zinc-400">
                                         Health: {{ $row->health_status?->value ?? $row->health_status }}
                                     </div>
-                                    <div class="text-xs text-zinc-500 dark:text-zinc-400">
-                                        Priority: {{ $row->priority }}
-                                    </div>
                                     <div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                                         Failures: {{ number_format($row->failure_count ?? 0) }} |
                                         Consecutive: {{ number_format($row->consecutive_failures ?? 0) }}
@@ -304,12 +301,6 @@
                                 <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Daily Limit</label>
                                 <input type="number" wire:model.defer="daily_limit" class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
                                 @error('daily_limit') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
-                            </div>
-
-                            <div>
-                                <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Priority</label>
-                                <input type="number" wire:model.defer="priority" class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
-                                @error('priority') <div class="mt-1 text-xs text-red-600">{{ $message }}</div> @enderror
                             </div>
 
                             <div class="flex items-center gap-3 pt-8">

@@ -6,6 +6,7 @@ use App\Http\Controllers\BulkMailerWebhookController;
 use App\Livewire\BulkMailer\CampaignCalendar\Index as BulkMailerCampaignCalendarIndex;
 use App\Livewire\BulkMailer\Campaigns\Index as BulkMailerCampaignsIndex;
 use App\Livewire\BulkMailer\Campaigns\Show as BulkMailerCampaignsShow;
+use App\Livewire\BulkMailer\Contacts\Create as BulkMailerContactsCreate;
 use App\Livewire\BulkMailer\Contacts\Index as BulkMailerContactsIndex;
 use App\Livewire\BulkMailer\Dashboard as BulkMailerDashboard;
 use App\Livewire\BulkMailer\Lists\Index as BulkMailerListsIndex;
@@ -15,12 +16,10 @@ use App\Livewire\BulkMailer\Segments\Index as BulkMailerSegmentsIndex;
 use App\Livewire\BulkMailer\SmtpAccounts\Index as BulkMailerSmtpAccountsIndex;
 use App\Livewire\BulkMailer\SmtpAnalytics\Index as BulkMailerSmtpAnalyticsIndex;
 use App\Livewire\BulkMailer\SmtpGroups\Index as BulkMailerSmtpGroupsIndex;
-use App\Livewire\BulkMailer\Templates\Builder as BulkMailerTemplatesBuilder;
 use App\Livewire\BulkMailer\Templates\Create as BulkMailerTemplatesCreate;
 use App\Livewire\BulkMailer\Templates\Edit as BulkMailerTemplatesEdit;
 use App\Livewire\BulkMailer\Templates\Index as BulkMailerTemplatesIndex;
 use App\Livewire\BulkMailer\Templates\Preview as BulkMailerTemplatesPreview;
-use App\Livewire\BulkMailer\Verifications\Index as BulkMailerVerificationsIndex;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/bulk-mailer/webhooks/{provider}', BulkMailerWebhookController::class)
@@ -47,15 +46,15 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         Route::get('/lists', BulkMailerListsIndex::class)->name('lists.index');
         Route::get('/segments', BulkMailerSegmentsIndex::class)->name('segments.index');
+
         Route::get('/contacts', BulkMailerContactsIndex::class)->name('contacts.index');
+        Route::get('/contacts/create', BulkMailerContactsCreate::class)->name('contacts.create');
         Route::get('/contacts/export', BulkMailerContactExportController::class)->name('contacts.export');
-        Route::get('/verifications', BulkMailerVerificationsIndex::class)->name('verifications.index');
 
         Route::get('/templates', BulkMailerTemplatesIndex::class)->name('templates.index');
         Route::get('/templates/create', BulkMailerTemplatesCreate::class)->name('templates.create');
         Route::get('/templates/{template}/edit', BulkMailerTemplatesEdit::class)->name('templates.edit');
         Route::get('/templates/{template}/preview', BulkMailerTemplatesPreview::class)->name('templates.preview');
-        Route::get('/templates/builder', BulkMailerTemplatesBuilder::class)->name('templates.builder');
 
         Route::get('/campaigns', BulkMailerCampaignsIndex::class)->name('campaigns.index');
         Route::get('/campaigns/calendar', BulkMailerCampaignCalendarIndex::class)->name('campaigns.calendar');
@@ -66,4 +65,4 @@ Route::middleware(['auth', 'verified'])->group(function () {
     });
 });
 
-require __DIR__.'/settings.php';
+require __DIR__ . '/settings.php';

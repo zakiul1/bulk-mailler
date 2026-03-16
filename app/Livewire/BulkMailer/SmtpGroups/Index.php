@@ -20,7 +20,7 @@ class Index extends Component
     public string $name = '';
     public string $description = '';
     public bool $is_active = true;
-    public string $rotation_mode = 'priority';
+    public string $rotation_mode = 'random';
     public array $selected_smtp_accounts = [];
 
     public function create(): void
@@ -37,7 +37,7 @@ class Index extends Component
         $this->name = $group->name;
         $this->description = $group->description ?? '';
         $this->is_active = $group->is_active;
-        $this->rotation_mode = $group->rotation_mode ?: 'priority';
+        $this->rotation_mode = $group->rotation_mode ?: 'random';
         $this->selected_smtp_accounts = $group->smtpAccounts->pluck('id')->map(fn ($id) => (string) $id)->all();
 
         $this->resetValidation();
@@ -50,7 +50,7 @@ class Index extends Component
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'is_active' => ['required', 'boolean'],
-            'rotation_mode' => ['required', 'in:priority,random,round_robin,least_used'],
+            'rotation_mode' => ['required', 'in:random,round_robin,least_used'],
             'selected_smtp_accounts' => ['required', 'array', 'min:1'],
             'selected_smtp_accounts.*' => ['integer', 'exists:bulk_mailer_smtp_accounts,id'],
         ], [
@@ -118,7 +118,7 @@ class Index extends Component
         $this->name = '';
         $this->description = '';
         $this->is_active = true;
-        $this->rotation_mode = 'priority';
+        $this->rotation_mode = 'random';
         $this->selected_smtp_accounts = [];
         $this->resetValidation();
     }
@@ -134,8 +134,8 @@ class Index extends Component
     public function getSmtpAccountsProperty()
     {
         return BulkMailerSmtpAccount::query()
-            ->orderBy('priority')
             ->orderBy('name')
+            ->orderBy('id')
             ->get();
     }
 

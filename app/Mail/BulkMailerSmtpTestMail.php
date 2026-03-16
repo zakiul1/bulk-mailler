@@ -17,7 +17,7 @@ class BulkMailerSmtpTestMail extends Mailable
 
     public function build(): self
     {
-        $mail = $this->subject('Bulk Mailer SMTP Test: '.$this->smtp->name)
+        $mail = $this->subject('Bulk Mailer SMTP Test: ' . $this->smtp->name)
             ->view('emails.bulk-mailer.smtp-test', [
                 'smtp' => $this->smtp,
             ])

@@ -8,6 +8,7 @@ use App\Mail\BulkMailerSmtpTestMail;
 use App\Models\BulkMailerSmtpAccount;
 use App\Models\BulkMailerTag;
 use App\Services\BulkMailerSmtpHealthService;
+use Illuminate\Mail\MailManager;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
@@ -40,7 +41,6 @@ class Index extends Component
     public string $from_email = '';
     public string $reply_to_email = '';
     public int|string $daily_limit = 500;
-    public int|string $priority = 1;
     public bool $is_active = true;
     public string $notes = '';
     public string $tag_names = '';
@@ -83,7 +83,6 @@ class Index extends Component
         $this->from_email = $smtp->from_email;
         $this->reply_to_email = $smtp->reply_to_email ?? '';
         $this->daily_limit = $smtp->daily_limit;
-        $this->priority = $smtp->priority;
         $this->is_active = (bool) $smtp->is_active;
         $this->notes = $smtp->notes ?? '';
         $this->tag_names = $smtp->tags->pluck('name')->implode(', ');
@@ -106,7 +105,6 @@ class Index extends Component
             'from_email' => $validated['from_email'],
             'reply_to_email' => $validated['reply_to_email'] ?: null,
             'daily_limit' => (int) $validated['daily_limit'],
-            'priority' => (int) $validated['priority'],
             'is_active' => (bool) $validated['is_active'],
             'notes' => $validated['notes'] ?: null,
             'health_status' => BulkMailerSmtpHealthStatus::Unknown,
@@ -170,7 +168,7 @@ class Index extends Component
         $this->showTestModal = true;
     }
 
-    public function sendTest(BulkMailerSmtpHealthService $smtpHealthService): void
+    public function sendTest(BulkMailerSmtpHealthService $smtpHealthService, MailManager $mailManager): void
     {
         $this->validate([
             'test_email' => ['required', 'email:rfc,dns'],
@@ -182,15 +180,8 @@ class Index extends Component
         $smtp = BulkMailerSmtpAccount::findOrFail($this->testId);
 
         try {
-            Config::set('mail.mailers.bulk_mailer_test', [
-                'transport' => 'smtp',
-                'host' => $smtp->host,
-                'port' => $smtp->port,
-                'encryption' => blank($smtp->encryption) ? null : $smtp->encryption,
-                'username' => $smtp->username,
-                'password' => $smtp->decrypted_password,
-                'timeout' => 30,
-            ]);
+            $this->configureSmtpTestMailer($smtp);
+            $mailManager->purge('bulk_mailer_test');
 
             Mail::mailer('bulk_mailer_test')
                 ->to($this->test_email)
@@ -204,9 +195,11 @@ class Index extends Component
 
             session()->flash('success', 'Test email sent successfully.');
         } catch (\Throwable $e) {
-            $smtpHealthService->markFailure($smtp, $e->getMessage());
+            $smtpHealthService->markFailure($smtp, mb_substr($e->getMessage(), 0, 1000));
 
-            $this->addError('test_email', 'Test email failed: '.$e->getMessage());
+            $this->addError('test_email', 'Test email failed: ' . $e->getMessage());
+        } finally {
+            $mailManager->purge('bulk_mailer_test');
         }
     }
 
@@ -251,7 +244,6 @@ class Index extends Component
         $this->from_email = '';
         $this->reply_to_email = '';
         $this->daily_limit = 500;
-        $this->priority = 1;
         $this->is_active = true;
         $this->notes = '';
         $this->tag_names = '';
@@ -275,7 +267,6 @@ class Index extends Component
             'from_email' => ['required', 'email:rfc,dns', 'max:255'],
             'reply_to_email' => ['nullable', 'email:rfc,dns', 'max:255'],
             'daily_limit' => ['required', 'integer', 'min:1', 'max:1000000'],
-            'priority' => ['required', 'integer', 'min:1', 'max:1000'],
             'is_active' => ['required', 'boolean'],
             'notes' => ['nullable', 'string'],
         ];
@@ -295,7 +286,6 @@ class Index extends Component
             'from_email.email' => 'From email must be valid.',
             'reply_to_email.email' => 'Reply-to email must be valid.',
             'daily_limit.required' => 'Daily limit is required.',
-            'priority.required' => 'Priority is required.',
         ];
     }
 
@@ -327,6 +317,37 @@ class Index extends Component
         return $ids;
     }
 
+    protected function configureSmtpTestMailer(BulkMailerSmtpAccount $smtp): void
+    {
+        Config::set('mail.mailers.bulk_mailer_test', [
+            'transport' => 'smtp',
+            'host' => $smtp->host,
+            'port' => $smtp->port,
+            'encryption' => blank($smtp->encryption) ? null : $smtp->encryption,
+            'username' => $smtp->username,
+            'password' => $smtp->decrypted_password,
+            'timeout' => 30,
+            'local_domain' => $this->resolveLocalDomain(),
+        ]);
+    }
+
+    protected function resolveLocalDomain(): string
+    {
+        $ehloDomain = env('MAIL_EHLO_DOMAIN');
+
+        if (filled($ehloDomain)) {
+            return $ehloDomain;
+        }
+
+        $appHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+
+        if (filled($appHost)) {
+            return $appHost;
+        }
+
+        return 'localhost';
+    }
+
     public function getRowsProperty()
     {
         return BulkMailerSmtpAccount::query()
@@ -334,10 +355,10 @@ class Index extends Component
             ->when($this->search !== '', function ($query) {
                 $query->where(function ($subQuery) {
                     $subQuery
-                        ->where('name', 'like', '%'.$this->search.'%')
-                        ->orWhere('host', 'like', '%'.$this->search.'%')
-                        ->orWhere('username', 'like', '%'.$this->search.'%')
-                        ->orWhere('from_email', 'like', '%'.$this->search.'%');
+                        ->where('name', 'like', '%' . $this->search . '%')
+                        ->orWhere('host', 'like', '%' . $this->search . '%')
+                        ->orWhere('username', 'like', '%' . $this->search . '%')
+                        ->orWhere('from_email', 'like', '%' . $this->search . '%');
                 });
             })
             ->when($this->statusFilter === 'active', fn ($query) => $query->where('is_active', true))
