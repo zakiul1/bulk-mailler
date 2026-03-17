@@ -123,8 +123,8 @@ class Index extends Component
         $payload = [
             'name' => trim($validated['name']),
             'subject' => $validated['subject'] ? trim($validated['subject']) : null,
-            'subject_a' => $validated['subject_a'] ?: null,
-            'subject_b' => $validated['subject_b'] ?: null,
+            'subject_a' => $validated['subject_a'] ? trim($validated['subject_a']) : null,
+            'subject_b' => $validated['subject_b'] ? trim($validated['subject_b']) : null,
             'ab_testing_enabled' => (bool) $validated['ab_testing_enabled'],
             'status' => $validated['status'],
             'bulk_mailer_template_id' => $validated['bulk_mailer_template_id'] ?: null,
@@ -151,6 +151,7 @@ class Index extends Component
 
         $this->showFormModal = false;
         $this->resetForm();
+        $this->resetPage();
 
         session()->flash('success', $message);
     }
@@ -178,6 +179,8 @@ class Index extends Component
 
         $clone->lists()->sync($campaign->lists->pluck('id')->all());
 
+        $this->resetPage();
+
         session()->flash('success', 'Campaign duplicated successfully.');
     }
 
@@ -203,11 +206,13 @@ class Index extends Component
             'scheduled_at' => $validated['reschedule_at'],
             'status' => BulkMailerCampaignStatus::Scheduled,
             'completed_at' => null,
+            'started_at' => null,
         ]);
 
         $this->showRescheduleModal = false;
         $this->rescheduleId = null;
         $this->reschedule_at = '';
+        $this->resetPage();
 
         session()->flash('success', 'Campaign rescheduled successfully.');
     }
@@ -230,6 +235,7 @@ class Index extends Component
 
         if (! $campaign->template) {
             $this->addError('test_email', 'This campaign has no template.');
+
             return;
         }
 
@@ -237,6 +243,7 @@ class Index extends Component
 
         if (! $smtp) {
             $this->addError('test_email', 'No available SMTP account was found for this campaign.');
+
             return;
         }
 
@@ -314,16 +321,19 @@ class Index extends Component
 
         if (! $campaign->template) {
             session()->flash('error', 'Campaign must have a template before launch.');
+
             return;
         }
 
         if (! $campaign->bulk_mailer_smtp_group_id) {
             session()->flash('error', 'Campaign must have an SMTP group before launch.');
+
             return;
         }
 
         if (! $rotationService->resolveForCampaign($campaign)) {
             session()->flash('error', 'No available SMTP account was found in the selected group.');
+
             return;
         }
 
@@ -331,16 +341,20 @@ class Index extends Component
 
         $campaign->update([
             'status' => $isScheduled ? BulkMailerCampaignStatus::Scheduled : BulkMailerCampaignStatus::Processing,
-            'started_at' => now(),
+            'started_at' => $isScheduled ? null : now(),
             'completed_at' => null,
         ]);
 
         if ($isScheduled) {
+            $this->resetPage();
             session()->flash('success', 'Campaign is scheduled and will be processed automatically.');
+
             return;
         }
 
         ProcessBulkMailerCampaign::dispatch($campaign->id);
+
+        $this->resetPage();
         session()->flash('success', 'Campaign launched successfully.');
     }
 
@@ -357,6 +371,7 @@ class Index extends Component
 
         ProcessBulkMailerCampaign::dispatch($campaign->id);
 
+        $this->resetPage();
         session()->flash('success', 'Scheduled campaign launched immediately.');
     }
 
@@ -366,6 +381,7 @@ class Index extends Component
             'status' => BulkMailerCampaignStatus::Paused,
         ]);
 
+        $this->resetPage();
         session()->flash('success', 'Campaign paused successfully.');
     }
 
@@ -385,6 +401,7 @@ class Index extends Component
 
         ProcessBulkMailerCampaign::dispatch($campaign->id);
 
+        $this->resetPage();
         session()->flash('success', 'Campaign resumed successfully.');
     }
 
@@ -395,6 +412,7 @@ class Index extends Component
             'completed_at' => now(),
         ]);
 
+        $this->resetPage();
         session()->flash('success', 'Campaign cancelled successfully.');
     }
 
@@ -410,6 +428,7 @@ class Index extends Component
 
         $this->showDeleteModal = false;
         $this->deleteId = null;
+        $this->resetPage();
 
         session()->flash('success', 'Campaign deleted successfully.');
     }
@@ -425,6 +444,11 @@ class Index extends Component
         $this->rescheduleId = null;
         $this->listSearch = '';
         $this->resetValidation();
+    }
+
+    public function refreshRows(): void
+    {
+        // Used by wire:poll in the Blade view to refresh campaign progress.
     }
 
     protected function resetForm(): void
@@ -506,25 +530,36 @@ class Index extends Component
             'username' => $smtp->username,
             'password' => $smtp->decrypted_password,
             'timeout' => 90,
-            'local_domain' => $this->resolveLocalDomain(),
+            'local_domain' => $this->resolveLocalDomain($smtp),
         ]);
     }
 
-    protected function resolveLocalDomain(): string
+    protected function resolveLocalDomain($smtp = null): string
     {
-        $ehloDomain = env('MAIL_EHLO_DOMAIN');
+        $configuredEhloDomain = (string) config('mail.ehlo_domain');
 
-        if (filled($ehloDomain)) {
-            return $ehloDomain;
+        if (filled($configuredEhloDomain) && ! $this->isLocalhostHost($configuredEhloDomain)) {
+            return $configuredEhloDomain;
         }
 
-        $appHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+        $appHost = (string) parse_url((string) config('app.url'), PHP_URL_HOST);
 
-        if (filled($appHost)) {
+        if (filled($appHost) && ! $this->isLocalhostHost($appHost)) {
             return $appHost;
         }
 
-        return 'localhost';
+        if ($smtp && filled($smtp->host) && ! $this->isLocalhostHost((string) $smtp->host)) {
+            return (string) $smtp->host;
+        }
+
+        return 'mail.example.com';
+    }
+
+    protected function isLocalhostHost(string $host): bool
+    {
+        $host = mb_strtolower(trim($host));
+
+        return in_array($host, ['localhost', '127.0.0.1', '::1'], true);
     }
 
     public function getEstimatedRecipientsProperty(): int
@@ -534,6 +569,22 @@ class Index extends Component
             filled($this->bulk_mailer_segment_id) ? (int) $this->bulk_mailer_segment_id : null,
             app(BulkMailerSegmentService::class)
         );
+    }
+
+    public function getShouldPollProperty(): bool
+    {
+        return BulkMailerCampaign::query()
+            ->when($this->statusFilter !== 'all', fn ($query) => $query->where('status', $this->statusFilter))
+            ->whereIn('status', [
+                BulkMailerCampaignStatus::Processing->value,
+                BulkMailerCampaignStatus::Scheduled->value,
+            ])
+            ->exists();
+    }
+
+    public function getPollIntervalProperty(): int
+    {
+        return 2000;
     }
 
     public function getRowsProperty()
@@ -599,7 +650,10 @@ class Index extends Component
 
     public function render()
     {
-        return view('livewire.bulk-mailer.campaigns.index')
+        return view('livewire.bulk-mailer.campaigns.index', [
+            'shouldPoll' => $this->shouldPoll,
+            'pollInterval' => $this->pollInterval,
+        ])
             ->layout('layouts.app')
             ->title('Campaigns');
     }

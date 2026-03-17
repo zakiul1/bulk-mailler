@@ -27,9 +27,9 @@
             <div class="border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900" wire:poll.2s="pollDeleteJob">
                 <div class="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
                     <div>
-                        <h2 class="text-base font-semibold text-zinc-900 dark:text-white">Delete Progress</h2>
+                        <h2 class="text-base font-semibold text-zinc-900 dark:text-white">Bulk Delete Progress</h2>
                         <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                            Real-time delete progress for the latest delete action.
+                            Real-time progress for the latest bulk delete action.
                         </p>
                     </div>
 
@@ -242,7 +242,7 @@
                                 </td>
 
                                 <td class="px-4 py-4 align-top">
-                                    <div class="font-medium text-zinc-900 dark:text-white">
+                                    <div class="font-sm text-zinc-900 dark:text-white">
                                         {{ $row->email }}
                                     </div>
                                 </td>

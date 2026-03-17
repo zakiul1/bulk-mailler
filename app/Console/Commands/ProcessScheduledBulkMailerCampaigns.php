@@ -24,9 +24,19 @@ class ProcessScheduledBulkMailerCampaigns extends Command
         $count = 0;
 
         foreach ($campaigns as $campaign) {
+            $campaign->refresh();
+
+            if ($campaign->status?->value === BulkMailerCampaignStatus::Cancelled->value) {
+                continue;
+            }
+
+            if ($campaign->status?->value === BulkMailerCampaignStatus::Processing->value) {
+                continue;
+            }
+
             $campaign->update([
                 'status' => BulkMailerCampaignStatus::Processing,
-                'started_at' => $campaign->started_at ?: now(),
+                'started_at' => now(),
                 'completed_at' => null,
             ]);
 

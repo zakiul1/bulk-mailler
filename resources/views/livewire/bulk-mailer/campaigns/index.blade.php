@@ -58,7 +58,16 @@
             </div>
         </div>
 
-        <div class="overflow-hidden border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
+        <div
+            class="overflow-hidden border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"
+            @if($shouldPoll) wire:poll.2s="refreshRows" @endif
+        >
+            @if($shouldPoll)
+                <div class="border-b border-zinc-200 bg-amber-50 px-4 py-2 text-xs text-amber-700 dark:border-zinc-700 dark:bg-amber-950/40 dark:text-amber-300">
+                    Refreshing campaign progress automatically...
+                </div>
+            @endif
+
             <div class="overflow-x-auto">
                 <table class="min-w-full divide-y divide-zinc-200 dark:divide-zinc-700">
                     <thead class="bg-zinc-50 dark:bg-zinc-950">
@@ -73,7 +82,17 @@
 
                     <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
                         @forelse ($this->rows as $row)
-                            <tr>
+                            @php
+                                $totalRecipients = (int) $row->total_recipients;
+                                $sentCount = (int) $row->sent_count;
+                                $failedCount = (int) $row->failed_count;
+                                $processedCount = $sentCount + $failedCount;
+                                $progressPercent = $totalRecipients > 0
+                                    ? min(100, (int) round(($processedCount / $totalRecipients) * 100))
+                                    : 0;
+                            @endphp
+
+                            <tr wire:key="campaign-row-{{ $row->id }}">
                                 <td class="px-4 py-4 align-top">
                                     <div class="font-medium text-zinc-900 dark:text-white">{{ $row->name }}</div>
 
@@ -82,10 +101,28 @@
                                     </div>
 
                                     <div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                                        Recipients: {{ number_format($row->total_recipients) }} |
-                                        Sent: {{ number_format($row->sent_count) }} |
-                                        Failed: {{ number_format($row->failed_count) }}
+                                        Recipients: {{ number_format($totalRecipients) }} |
+                                        Sent: {{ number_format($sentCount) }} |
+                                        Failed: {{ number_format($failedCount) }}
                                     </div>
+
+                                    @if (($row->status?->value ?? $row->status) === 'processing' || ($row->status?->value ?? $row->status) === 'scheduled')
+                                        <div class="mt-2">
+                                            <div class="mb-1 flex items-center justify-between text-[11px] text-zinc-500 dark:text-zinc-400">
+                                                <span>
+                                                    Progress: {{ number_format($processedCount) }}/{{ number_format($totalRecipients) }}
+                                                </span>
+                                                <span>{{ $progressPercent }}%</span>
+                                            </div>
+
+                                            <div class="h-2 w-full overflow-hidden rounded bg-zinc-200 dark:bg-zinc-800">
+                                                <div
+                                                    class="h-2 bg-zinc-900 transition-all duration-300 dark:bg-white"
+                                                    style="width: {{ $progressPercent }}%;"
+                                                ></div>
+                                            </div>
+                                        </div>
+                                    @endif
 
                                     @if ($row->ab_testing_enabled)
                                         <div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">

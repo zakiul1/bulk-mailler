@@ -12,6 +12,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | EHLO / Local Domain
+    |--------------------------------------------------------------------------
+    |
+    | Used by SMTP transports for the EHLO/HELO hostname.
+    | Set MAIL_EHLO_DOMAIN in .env to a real domain like:
+    | mail.yourdomain.com
+    |
+    */
+
+    'ehlo_domain' => env('MAIL_EHLO_DOMAIN'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Mailer Configurations
     |--------------------------------------------------------------------------
     */
@@ -29,7 +42,7 @@ return [
             'timeout' => env('MAIL_TIMEOUT', 60),
             'local_domain' => env(
                 'MAIL_EHLO_DOMAIN',
-                parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST) ?: 'localhost'
+                parse_url((string) env('APP_URL', 'https://example.com'), PHP_URL_HOST) ?: 'mail.example.com'
             ),
         ],
 
@@ -54,7 +67,7 @@ return [
             'timeout' => 90,
             'local_domain' => env(
                 'MAIL_EHLO_DOMAIN',
-                parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST) ?: 'localhost'
+                parse_url((string) env('APP_URL', 'https://example.com'), PHP_URL_HOST) ?: 'mail.example.com'
             ),
         ],
 
@@ -69,7 +82,7 @@ return [
             'timeout' => 90,
             'local_domain' => env(
                 'MAIL_EHLO_DOMAIN',
-                parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST) ?: 'localhost'
+                parse_url((string) env('APP_URL', 'https://example.com'), PHP_URL_HOST) ?: 'mail.example.com'
             ),
         ],
 
@@ -84,7 +97,7 @@ return [
             'timeout' => 30,
             'local_domain' => env(
                 'MAIL_EHLO_DOMAIN',
-                parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST) ?: 'localhost'
+                parse_url((string) env('APP_URL', 'https://example.com'), PHP_URL_HOST) ?: 'mail.example.com'
             ),
         ],
 

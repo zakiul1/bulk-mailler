@@ -95,6 +95,10 @@ class Index extends Component
     {
         $validated = $this->validate($this->rules(), $this->messages());
 
+        $validated = $this->normalizeValidatedData($validated);
+
+        $this->validateSendingIdentity($validated);
+
         $payload = [
             'name' => $validated['name'],
             'host' => $validated['host'],
@@ -184,7 +188,7 @@ class Index extends Component
             $mailManager->purge('bulk_mailer_test');
 
             Mail::mailer('bulk_mailer_test')
-                ->to($this->test_email)
+                ->to($this->normalizeEmail($this->test_email))
                 ->send(new BulkMailerSmtpTestMail($smtp));
 
             $smtpHealthService->markSuccess($smtp);
@@ -327,25 +331,111 @@ class Index extends Component
             'username' => $smtp->username,
             'password' => $smtp->decrypted_password,
             'timeout' => 30,
-            'local_domain' => $this->resolveLocalDomain(),
+            'local_domain' => $this->resolveLocalDomain($smtp),
         ]);
     }
 
-    protected function resolveLocalDomain(): string
+    protected function resolveLocalDomain(?BulkMailerSmtpAccount $smtp = null): string
     {
-        $ehloDomain = env('MAIL_EHLO_DOMAIN');
+        $configuredEhloDomain = (string) config('mail.ehlo_domain');
 
-        if (filled($ehloDomain)) {
-            return $ehloDomain;
+        if (filled($configuredEhloDomain) && ! $this->isLocalhostHost($configuredEhloDomain)) {
+            return $configuredEhloDomain;
         }
 
-        $appHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+        $appHost = (string) parse_url((string) config('app.url'), PHP_URL_HOST);
 
-        if (filled($appHost)) {
+        if (filled($appHost) && ! $this->isLocalhostHost($appHost)) {
             return $appHost;
         }
 
-        return 'localhost';
+        if ($smtp && filled($smtp->host) && ! $this->isLocalhostHost((string) $smtp->host)) {
+            return (string) $smtp->host;
+        }
+
+        return 'mail.example.com';
+    }
+
+    protected function normalizeValidatedData(array $validated): array
+    {
+        $validated['name'] = $this->sanitizeText($validated['name']);
+        $validated['host'] = $this->normalizeHost($validated['host']);
+        $validated['username'] = trim((string) $validated['username']);
+        $validated['from_name'] = $this->sanitizeText($validated['from_name']);
+        $validated['from_email'] = $this->normalizeEmail($validated['from_email']);
+        $validated['reply_to_email'] = filled($validated['reply_to_email'] ?? null)
+            ? $this->normalizeEmail($validated['reply_to_email'])
+            : '';
+        $validated['notes'] = isset($validated['notes'])
+            ? trim((string) $validated['notes'])
+            : '';
+
+        return $validated;
+    }
+
+    protected function validateSendingIdentity(array $validated): void
+    {
+        $usernameDomain = $this->extractDomain($validated['username']);
+        $fromDomain = $this->extractDomain($validated['from_email']);
+        $replyToDomain = $this->extractDomain($validated['reply_to_email'] ?? null);
+
+        if ($usernameDomain && $fromDomain && $usernameDomain !== $fromDomain) {
+            $this->addError('from_email', 'From email domain must match the SMTP username domain.');
+
+            throw new \Illuminate\Validation\ValidationException(
+                validator()->make([], [])
+            );
+        }
+
+        if ($replyToDomain && $fromDomain && $replyToDomain !== $fromDomain) {
+            $this->addError('reply_to_email', 'Reply-to email domain must match the from email domain.');
+
+            throw new \Illuminate\Validation\ValidationException(
+                validator()->make([], [])
+            );
+        }
+    }
+
+    protected function normalizeEmail(?string $email): string
+    {
+        return mb_strtolower(trim((string) $email));
+    }
+
+    protected function normalizeHost(?string $host): string
+    {
+        $host = mb_strtolower(trim((string) $host));
+        $host = preg_replace('#^https?://#i', '', $host);
+        $host = trim($host, "/ \t\n\r\0\x0B");
+
+        return $host;
+    }
+
+    protected function sanitizeText(?string $value): string
+    {
+        $value = trim((string) $value);
+        $value = str_replace(["\r", "\n"], ' ', $value);
+
+        return preg_replace('/\s+/', ' ', $value) ?: '';
+    }
+
+    protected function extractDomain(?string $value): ?string
+    {
+        $value = trim((string) $value);
+
+        if ($value === '' || ! str_contains($value, '@')) {
+            return null;
+        }
+
+        $parts = explode('@', mb_strtolower($value));
+
+        return $parts[count($parts) - 1] ?: null;
+    }
+
+    protected function isLocalhostHost(string $host): bool
+    {
+        $host = mb_strtolower(trim($host));
+
+        return in_array($host, ['localhost', '127.0.0.1', '::1'], true);
     }
 
     public function getRowsProperty()

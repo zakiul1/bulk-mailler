@@ -54,6 +54,7 @@ class Index extends Component
     {
         if (! $value) {
             $this->selected = [];
+
             return;
         }
 
@@ -73,29 +74,15 @@ class Index extends Component
     {
         $contact = BulkMailerContact::findOrFail($this->deleteId);
 
-        $deleteJob = BulkMailerContactDeleteJob::create([
-            'bulk_mailer_contact_list_id' => $contact->bulk_mailer_contact_list_id,
-            'status' => 'queued',
-            'selection_type' => 'selected',
-            'filters' => [
-                'ids' => [$contact->id],
-                'search' => $this->search,
-                'list_id' => $this->listFilter,
-            ],
-            'created_by' => auth()->id(),
-        ]);
-
-        $this->latestDeleteJobId = $deleteJob->id;
-
-        ProcessBulkMailerContactDelete::dispatch($deleteJob->id);
+        $contact->delete();
 
         $this->showDeleteModal = false;
         $this->deleteId = null;
         $this->resetSelection();
         $this->resetPage();
 
-        session()->flash('success', 'Delete started.');
-        $this->dispatch('notify', type: 'success', message: 'Delete started.');
+        session()->flash('success', 'Contact deleted successfully.');
+        $this->dispatch('notify', type: 'success', message: 'Contact deleted successfully.');
     }
 
     public function confirmBulkDelete(): void
@@ -103,6 +90,7 @@ class Index extends Component
         if (empty($this->selected)) {
             session()->flash('error', 'Please select at least one contact.');
             $this->dispatch('notify', type: 'error', message: 'Please select at least one contact.');
+
             return;
         }
 
@@ -122,6 +110,7 @@ class Index extends Component
             $this->showBulkDeleteModal = false;
             session()->flash('error', 'No valid contacts selected.');
             $this->dispatch('notify', type: 'error', message: 'No valid contacts selected.');
+
             return;
         }
 
@@ -160,6 +149,7 @@ class Index extends Component
         if ($ids->isEmpty()) {
             session()->flash('error', 'Please select at least one contact to copy.');
             $this->dispatch('notify', type: 'error', message: 'Please select at least one contact to copy.');
+
             return;
         }
 
@@ -177,8 +167,7 @@ class Index extends Component
 
     public function pollDeleteJob(): void
     {
-        // Keep section visible during polling.
-        // Do not clear completed/failed job automatically.
+        // Bulk delete progress polling only.
     }
 
     public function clearDeleteJob(): void
@@ -191,6 +180,7 @@ class Index extends Component
 
         if (! $job) {
             $this->latestDeleteJobId = null;
+
             return;
         }
 
