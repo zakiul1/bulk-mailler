@@ -35,7 +35,7 @@
                 <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Search</label>
                 <input type="text" wire:model.live.debounce.300ms="search" name="campaign_search"
                     id="campaign_search" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
-                    placeholder="Search by campaign name or subject"
+                    placeholder="Search by campaign name, subject, or pause reason"
                     class="w-full border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
             </div>
 
@@ -94,6 +94,7 @@
                     <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
                         @forelse ($this->rows as $row)
                             @php
+                                $rowStatus = $row->status?->value ?? $row->status;
                                 $totalRecipients = (int) $row->total_recipients;
                                 $sentCount = (int) $row->sent_count;
                                 $failedCount = (int) $row->failed_count;
@@ -102,6 +103,47 @@
                                     $totalRecipients > 0
                                         ? min(100, (int) round(($processedCount / $totalRecipients) * 100))
                                         : 0;
+
+                                $statusBadgeClasses = match ($rowStatus) {
+                                    'processing'
+                                        => 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300',
+                                    'paused'
+                                        => 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300',
+                                    'scheduled'
+                                        => 'border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300',
+                                    'completed'
+                                        => 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300',
+                                    'cancelled'
+                                        => 'border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300',
+                                    'failed'
+                                        => 'border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300',
+                                    default
+                                        => 'border-zinc-300 bg-zinc-50 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200',
+                                };
+
+                                $launchClass = in_array($rowStatus, ['draft', 'failed'], true)
+                                    ? 'border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800 dark:border-white dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200'
+                                    : 'border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800';
+
+                                $launchNowClass =
+                                    $rowStatus === 'scheduled'
+                                        ? 'border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800 dark:border-white dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200'
+                                        : 'border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800';
+
+                                $pauseClass =
+                                    $rowStatus === 'processing'
+                                        ? 'border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800 dark:border-white dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200'
+                                        : 'border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800';
+
+                                $resumeClass =
+                                    $rowStatus === 'paused'
+                                        ? 'border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800 dark:border-white dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200'
+                                        : 'border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800';
+
+                                $rescheduleClass =
+                                    $rowStatus === 'scheduled'
+                                        ? 'border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800 dark:border-white dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200'
+                                        : 'border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800';
                             @endphp
 
                             <tr wire:key="campaign-row-{{ $row->id }}">
@@ -118,7 +160,7 @@
                                         Failed: {{ number_format($failedCount) }}
                                     </div>
 
-                                    @if (($row->status?->value ?? $row->status) === 'processing' || ($row->status?->value ?? $row->status) === 'scheduled')
+                                    @if (in_array($rowStatus, ['processing', 'scheduled', 'paused'], true))
                                         <div class="mt-2">
                                             <div
                                                 class="mb-1 flex items-center justify-between text-[11px] text-zinc-500 dark:text-zinc-400">
@@ -176,13 +218,24 @@
                                 </td>
 
                                 <td class="px-4 py-4 align-top">
-                                    <div class="text-sm text-zinc-900 dark:text-white">
-                                        {{ $row->status?->label() ?? $row->status }}
+                                    <div>
+                                        <span
+                                            class="inline-flex items-center border px-2.5 py-1 text-xs font-bold uppercase tracking-wide {{ $statusBadgeClasses }}">
+                                            {{ $row->status?->label() ?? $row->status }}
+                                        </span>
                                     </div>
 
                                     @if ($row->scheduled_at)
-                                        <div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                                        <div class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
                                             {{ $row->scheduled_at->format('Y-m-d h:i A') }}
+                                        </div>
+                                    @endif
+
+                                    @if (filled($row->pause_reason))
+                                        <div
+                                            class="mt-2 border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                                            <span class="font-semibold">Reason:</span>
+                                            {{ $row->pause_reason }}
                                         </div>
                                     @endif
                                 </td>
@@ -195,59 +248,87 @@
                                         </a>
 
                                         <button type="button" wire:click="duplicate({{ $row->id }})"
-                                            class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800">
+                                            wire:loading.attr="disabled" wire:target="duplicate({{ $row->id }})"
+                                            class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800">
                                             Duplicate
                                         </button>
 
                                         <button type="button" wire:click="openRescheduleModal({{ $row->id }})"
-                                            class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800">
+                                            wire:loading.attr="disabled"
+                                            wire:target="openRescheduleModal({{ $row->id }})"
+                                            class="border px-3 py-1.5 text-xs disabled:opacity-60 {{ $rescheduleClass }}">
                                             Reschedule
                                         </button>
 
                                         <button type="button" wire:click="openTestModal({{ $row->id }})"
-                                            class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800">
+                                            wire:loading.attr="disabled"
+                                            wire:target="openTestModal({{ $row->id }})"
+                                            class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800">
                                             Test
                                         </button>
 
                                         @if ($failedCount > 0)
                                             <button type="button" wire:click="retryFailed({{ $row->id }})"
-                                                class="border border-amber-300 px-3 py-1.5 text-xs text-amber-700 hover:bg-amber-50 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-950">
+                                                wire:loading.attr="disabled"
+                                                wire:target="retryFailed({{ $row->id }})"
+                                                class="border border-amber-300 px-3 py-1.5 text-xs text-amber-700 hover:bg-amber-50 disabled:opacity-60 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-950">
                                                 Retry Failed
                                             </button>
                                         @endif
 
                                         <button type="button" wire:click="launch({{ $row->id }})"
-                                            class="border border-zinc-900 bg-zinc-900 px-3 py-1.5 text-xs text-white hover:bg-zinc-800 dark:border-white dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200">
-                                            Launch
+                                            wire:loading.attr="disabled" wire:target="launch({{ $row->id }})"
+                                            class="border px-3 py-1.5 text-xs disabled:opacity-60 {{ $launchClass }}">
+                                            <span wire:loading.remove
+                                                wire:target="launch({{ $row->id }})">Launch</span>
+                                            <span wire:loading
+                                                wire:target="launch({{ $row->id }})">Launching...</span>
                                         </button>
 
                                         <button type="button" wire:click="launchNow({{ $row->id }})"
-                                            class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800">
-                                            Launch Now
+                                            wire:loading.attr="disabled" wire:target="launchNow({{ $row->id }})"
+                                            class="border px-3 py-1.5 text-xs disabled:opacity-60 {{ $launchNowClass }}">
+                                            <span wire:loading.remove
+                                                wire:target="launchNow({{ $row->id }})">Launch Now</span>
+                                            <span wire:loading
+                                                wire:target="launchNow({{ $row->id }})">Launching...</span>
                                         </button>
 
                                         <button type="button" wire:click="pause({{ $row->id }})"
-                                            class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800">
-                                            Pause
+                                            wire:loading.attr="disabled" wire:target="pause({{ $row->id }})"
+                                            class="border px-3 py-1.5 text-xs disabled:opacity-60 {{ $pauseClass }}">
+                                            <span wire:loading.remove
+                                                wire:target="pause({{ $row->id }})">Pause</span>
+                                            <span wire:loading
+                                                wire:target="pause({{ $row->id }})">Pausing...</span>
                                         </button>
 
                                         <button type="button" wire:click="resume({{ $row->id }})"
-                                            class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800">
-                                            Resume
+                                            wire:loading.attr="disabled" wire:target="resume({{ $row->id }})"
+                                            class="border px-3 py-1.5 text-xs disabled:opacity-60 {{ $resumeClass }}">
+                                            <span wire:loading.remove
+                                                wire:target="resume({{ $row->id }})">Resume</span>
+                                            <span wire:loading
+                                                wire:target="resume({{ $row->id }})">Resuming...</span>
                                         </button>
 
                                         <button type="button" wire:click="cancelCampaign({{ $row->id }})"
-                                            class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800">
+                                            wire:loading.attr="disabled"
+                                            wire:target="cancelCampaign({{ $row->id }})"
+                                            class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800">
                                             Cancel
                                         </button>
 
                                         <button type="button" wire:click="edit({{ $row->id }})"
-                                            class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800">
+                                            wire:loading.attr="disabled" wire:target="edit({{ $row->id }})"
+                                            class="border border-zinc-300 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800">
                                             Edit
                                         </button>
 
                                         <button type="button" wire:click="confirmDelete({{ $row->id }})"
-                                            class="border border-red-300 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950">
+                                            wire:loading.attr="disabled"
+                                            wire:target="confirmDelete({{ $row->id }})"
+                                            class="border border-red-300 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 disabled:opacity-60 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950">
                                             Delete
                                         </button>
                                     </div>

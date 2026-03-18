@@ -132,6 +132,7 @@ class Index extends Component
             'subject_b' => $validated['subject_b'] ? trim($validated['subject_b']) : null,
             'ab_testing_enabled' => (bool) $validated['ab_testing_enabled'],
             'status' => $validated['status'],
+            'pause_reason' => null,
             'bulk_mailer_template_id' => $validated['bulk_mailer_template_id'] ?: null,
             'bulk_mailer_segment_id' => $validated['bulk_mailer_segment_id'] ?: null,
             'bulk_mailer_smtp_group_id' => $validated['bulk_mailer_smtp_group_id'] ?: null,
@@ -174,10 +175,13 @@ class Index extends Component
             'subject_b' => $campaign->subject_b,
             'ab_testing_enabled' => $campaign->ab_testing_enabled,
             'status' => BulkMailerCampaignStatus::Draft,
+            'pause_reason' => null,
             'bulk_mailer_template_id' => $campaign->bulk_mailer_template_id,
             'bulk_mailer_segment_id' => $campaign->bulk_mailer_segment_id,
             'bulk_mailer_smtp_group_id' => $campaign->bulk_mailer_smtp_group_id,
             'scheduled_at' => null,
+            'started_at' => null,
+            'completed_at' => null,
             'total_recipients' => $campaign->total_recipients,
             'sent_count' => 0,
             'failed_count' => 0,
@@ -212,6 +216,7 @@ class Index extends Component
         $campaign->update([
             'scheduled_at' => $validated['reschedule_at'],
             'status' => BulkMailerCampaignStatus::Scheduled,
+            'pause_reason' => null,
             'completed_at' => null,
             'started_at' => null,
         ]);
@@ -350,6 +355,7 @@ class Index extends Component
 
         $campaign->update([
             'status' => $isScheduled ? BulkMailerCampaignStatus::Scheduled : BulkMailerCampaignStatus::Processing,
+            'pause_reason' => null,
             'started_at' => $isScheduled ? null : now(),
             'completed_at' => null,
         ]);
@@ -373,6 +379,7 @@ class Index extends Component
 
         $campaign->update([
             'status' => BulkMailerCampaignStatus::Processing,
+            'pause_reason' => null,
             'scheduled_at' => null,
             'started_at' => now(),
             'completed_at' => null,
@@ -388,6 +395,7 @@ class Index extends Component
     {
         BulkMailerCampaign::findOrFail($id)->update([
             'status' => BulkMailerCampaignStatus::Paused,
+            'pause_reason' => 'Paused manually by user.',
         ]);
 
         $this->resetPage();
@@ -405,6 +413,7 @@ class Index extends Component
 
         $campaign->update([
             'status' => BulkMailerCampaignStatus::Processing,
+            'pause_reason' => null,
             'completed_at' => null,
         ]);
 
@@ -445,6 +454,7 @@ class Index extends Component
 
         $campaign->update([
             'status' => BulkMailerCampaignStatus::Processing,
+            'pause_reason' => null,
             'sent_count' => $sentCount,
             'failed_count' => 0,
             'completed_at' => null,
@@ -461,6 +471,7 @@ class Index extends Component
     {
         BulkMailerCampaign::findOrFail($id)->update([
             'status' => BulkMailerCampaignStatus::Cancelled,
+            'pause_reason' => 'Campaign cancelled by user.',
             'completed_at' => now(),
         ]);
 
@@ -669,6 +680,7 @@ class Index extends Component
             ->whereIn('status', [
                 BulkMailerCampaignStatus::Processing->value,
                 BulkMailerCampaignStatus::Scheduled->value,
+                BulkMailerCampaignStatus::Paused->value,
             ])
             ->exists();
     }
@@ -688,7 +700,8 @@ class Index extends Component
                         ->where('name', 'like', '%' . $this->search . '%')
                         ->orWhere('subject', 'like', '%' . $this->search . '%')
                         ->orWhere('subject_a', 'like', '%' . $this->search . '%')
-                        ->orWhere('subject_b', 'like', '%' . $this->search . '%');
+                        ->orWhere('subject_b', 'like', '%' . $this->search . '%')
+                        ->orWhere('pause_reason', 'like', '%' . $this->search . '%');
                 });
             })
             ->when($this->statusFilter !== 'all', fn($query) => $query->where('status', $this->statusFilter))

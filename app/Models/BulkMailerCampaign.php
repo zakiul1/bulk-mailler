@@ -20,6 +20,7 @@ class BulkMailerCampaign extends Model
         'subject_b',
         'ab_testing_enabled',
         'status',
+        'pause_reason',
         'bulk_mailer_template_id',
         'bulk_mailer_segment_id',
         'bulk_mailer_smtp_group_id',
@@ -35,6 +36,7 @@ class BulkMailerCampaign extends Model
     protected $casts = [
         'ab_testing_enabled' => 'boolean',
         'status' => BulkMailerCampaignStatus::class,
+        'pause_reason' => 'string',
         'scheduled_at' => 'datetime',
         'started_at' => 'datetime',
         'completed_at' => 'datetime',

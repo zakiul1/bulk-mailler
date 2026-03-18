@@ -111,22 +111,28 @@
                             <tr>
                                 <th
                                     class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                    Variant</th>
+                                    Variant
+                                </th>
                                 <th
                                     class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                    Subject</th>
+                                    Subject
+                                </th>
                                 <th
                                     class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                    Sent</th>
+                                    Sent
+                                </th>
                                 <th
                                     class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                    Failed</th>
+                                    Failed
+                                </th>
                                 <th
                                     class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                    Opens</th>
+                                    Opens
+                                </th>
                                 <th
                                     class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                    Clicks</th>
+                                    Clicks
+                                </th>
                             </tr>
                         </thead>
 
@@ -134,29 +140,39 @@
                             <tr>
                                 <td class="px-4 py-4 text-sm text-zinc-900 dark:text-white">A</td>
                                 <td class="px-4 py-4 text-sm text-zinc-900 dark:text-white">
-                                    {{ $campaign->subject_a ?: '-' }}</td>
+                                    {{ $campaign->subject_a ?: '-' }}
+                                </td>
                                 <td class="px-4 py-4 text-sm text-zinc-900 dark:text-white">
-                                    {{ number_format($this->variantStats['A']['sent']) }}</td>
+                                    {{ number_format($this->variantStats['A']['sent']) }}
+                                </td>
                                 <td class="px-4 py-4 text-sm text-zinc-900 dark:text-white">
-                                    {{ number_format($this->variantStats['A']['failed']) }}</td>
+                                    {{ number_format($this->variantStats['A']['failed']) }}
+                                </td>
                                 <td class="px-4 py-4 text-sm text-zinc-900 dark:text-white">
-                                    {{ number_format($this->variantStats['A']['opens']) }}</td>
+                                    {{ number_format($this->variantStats['A']['opens']) }}
+                                </td>
                                 <td class="px-4 py-4 text-sm text-zinc-900 dark:text-white">
-                                    {{ number_format($this->variantStats['A']['clicks']) }}</td>
+                                    {{ number_format($this->variantStats['A']['clicks']) }}
+                                </td>
                             </tr>
 
                             <tr>
                                 <td class="px-4 py-4 text-sm text-zinc-900 dark:text-white">B</td>
                                 <td class="px-4 py-4 text-sm text-zinc-900 dark:text-white">
-                                    {{ $campaign->subject_b ?: '-' }}</td>
+                                    {{ $campaign->subject_b ?: '-' }}
+                                </td>
                                 <td class="px-4 py-4 text-sm text-zinc-900 dark:text-white">
-                                    {{ number_format($this->variantStats['B']['sent']) }}</td>
+                                    {{ number_format($this->variantStats['B']['sent']) }}
+                                </td>
                                 <td class="px-4 py-4 text-sm text-zinc-900 dark:text-white">
-                                    {{ number_format($this->variantStats['B']['failed']) }}</td>
+                                    {{ number_format($this->variantStats['B']['failed']) }}
+                                </td>
                                 <td class="px-4 py-4 text-sm text-zinc-900 dark:text-white">
-                                    {{ number_format($this->variantStats['B']['opens']) }}</td>
+                                    {{ number_format($this->variantStats['B']['opens']) }}
+                                </td>
                                 <td class="px-4 py-4 text-sm text-zinc-900 dark:text-white">
-                                    {{ number_format($this->variantStats['B']['clicks']) }}</td>
+                                    {{ number_format($this->variantStats['B']['clicks']) }}
+                                </td>
                             </tr>
                         </tbody>
                     </table>
@@ -239,7 +255,7 @@
                     <h2 class="text-lg font-semibold text-zinc-900 dark:text-white">Recipient Logs</h2>
 
                     <div class="text-xs text-zinc-500 dark:text-zinc-400">
-                        Total: {{ $campaign->recipients->count() }}
+                        Total: {{ number_format($campaign->total_recipients) }}
                     </div>
                 </div>
 
@@ -249,30 +265,37 @@
                             <tr>
                                 <th
                                     class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                    Recipient</th>
+                                    Recipient
+                                </th>
                                 <th
                                     class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                    Category</th>
+                                    Category
+                                </th>
                                 <th
                                     class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                    Variant</th>
+                                    Variant
+                                </th>
                                 <th
                                     class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                    SMTP</th>
+                                    SMTP
+                                </th>
                                 <th
                                     class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                    Status</th>
+                                    Status
+                                </th>
                                 <th
                                     class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                    Sent At</th>
+                                    Sent At
+                                </th>
                                 <th
                                     class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                    Error</th>
+                                    Error
+                                </th>
                             </tr>
                         </thead>
 
                         <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
-                            @forelse ($campaign->recipients as $recipient)
+                            @forelse ($recipientLogs as $recipient)
                                 <tr>
                                     <td class="px-4 py-4 align-top">
                                         <div class="font-medium text-zinc-900 dark:text-white">
@@ -335,6 +358,10 @@
                             @endforelse
                         </tbody>
                     </table>
+                </div>
+
+                <div class="border-t border-zinc-200 px-4 py-3 dark:border-zinc-700">
+                    {{ $recipientLogs->links() }}
                 </div>
             </div>
         </div>

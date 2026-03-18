@@ -20,6 +20,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Mail\MailManager;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Mail;
 
@@ -28,6 +29,8 @@ class ProcessBulkMailerCampaign implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $timeout = 1200;
+
+    protected int $batchSize = 25;
 
     public function __construct(public int $campaignId)
     {
@@ -40,9 +43,206 @@ class ProcessBulkMailerCampaign implements ShouldQueue
         BulkMailerSmtpHealthService $smtpHealthService,
         MailManager $mailManager
     ): void {
-        $campaign = BulkMailerCampaign::with(['template', 'lists', 'segment', 'smtpGroup.smtpAccounts'])->find($this->campaignId);
+        $lock = Cache::lock('bulk_mailer_campaign_processing_' . $this->campaignId, 900);
 
-        if (!$campaign || !$campaign->template || !$campaign->smtpGroup) {
+        if (!$lock->get()) {
+            return;
+        }
+
+        try {
+            $campaign = BulkMailerCampaign::with(['template', 'lists', 'segment', 'smtpGroup.smtpAccounts'])->find($this->campaignId);
+
+            if (!$campaign || !$campaign->template || !$campaign->smtpGroup) {
+                return;
+            }
+
+            if ($campaign->status?->value === BulkMailerCampaignStatus::Cancelled->value) {
+                return;
+            }
+
+            if ($campaign->status?->value === BulkMailerCampaignStatus::Completed->value) {
+                return;
+            }
+
+            $campaign->update([
+                'status' => BulkMailerCampaignStatus::Processing,
+                'pause_reason' => null,
+                'started_at' => $campaign->started_at ?: now(),
+                'completed_at' => null,
+            ]);
+
+            $this->syncRecipients($campaign, $segmentService);
+            $this->syncLiveCampaignCounts($campaign, BulkMailerCampaignStatus::Processing);
+
+            $pendingRecipients = BulkMailerCampaignRecipient::query()
+                ->with('contact')
+                ->where('bulk_mailer_campaign_id', $campaign->id)
+                ->where('status', BulkMailerCampaignRecipientStatus::Pending->value)
+                ->orderBy('id')
+                ->limit($this->batchSize)
+                ->get();
+
+            if ($pendingRecipients->isEmpty()) {
+                $this->refreshCampaignCountsAndStatus($campaign);
+
+                return;
+            }
+
+            foreach ($pendingRecipients as $recipient) {
+                $campaign->refresh();
+
+                if ($campaign->status?->value === BulkMailerCampaignStatus::Paused->value) {
+                    $this->syncLiveCampaignCounts($campaign, BulkMailerCampaignStatus::Paused);
+
+                    return;
+                }
+
+                if ($campaign->status?->value === BulkMailerCampaignStatus::Cancelled->value) {
+                    $this->syncLiveCampaignCounts($campaign, BulkMailerCampaignStatus::Cancelled, true);
+
+                    return;
+                }
+
+                $smtp = $rotationService->resolveForCampaign($campaign->fresh('smtpGroup.smtpAccounts'));
+
+                if (!$smtp) {
+                    $campaign->update([
+                        'status' => BulkMailerCampaignStatus::Paused,
+                        'pause_reason' => $this->determinePauseReason($campaign),
+                    ]);
+
+                    $this->syncLiveCampaignCounts($campaign, BulkMailerCampaignStatus::Paused);
+
+                    return;
+                }
+
+                try {
+                    if (!$recipient->contact) {
+                        $recipient->update([
+                            'bulk_mailer_smtp_account_id' => $smtp->id,
+                            'status' => BulkMailerCampaignRecipientStatus::Failed,
+                            'error_message' => 'Recipient contact record not found.',
+                            'sent_at' => null,
+                        ]);
+
+                        $smtpHealthService->markFailure($smtp, 'Recipient contact record not found.');
+                        $eventService->logFailed($recipient, 'Recipient contact record not found.');
+                        $this->syncLiveCampaignCounts($campaign, BulkMailerCampaignStatus::Processing);
+
+                        continue;
+                    }
+
+                    $normalizedRecipientEmail = $this->normalizeEmail($recipient->email ?: $recipient->contact->email);
+
+                    if (!$this->isValidEmail($normalizedRecipientEmail)) {
+                        $recipient->update([
+                            'bulk_mailer_smtp_account_id' => $smtp->id,
+                            'status' => BulkMailerCampaignRecipientStatus::Failed,
+                            'error_message' => 'Recipient email address is invalid.',
+                            'sent_at' => null,
+                        ]);
+
+                        $smtpHealthService->markFailure($smtp, 'Recipient email address is invalid.');
+                        $eventService->logFailed($recipient, 'Recipient email address is invalid.');
+                        $this->syncLiveCampaignCounts($campaign, BulkMailerCampaignStatus::Processing);
+
+                        continue;
+                    }
+
+                    $subjectTemplate = $campaign->subject ?: $campaign->template->subject;
+
+                    if ($campaign->ab_testing_enabled) {
+                        $subjectTemplate = $recipient->subject_variant === 'B'
+                            ? ($campaign->subject_b ?: $subjectTemplate)
+                            : ($campaign->subject_a ?: $subjectTemplate);
+                    }
+
+                    $renderedSubject = $this->replaceVariables((string) $subjectTemplate, $recipient->contact);
+
+                    $htmlSource = $campaign->template->html_content;
+                    $textSource = $campaign->template->text_content;
+
+                    $renderedHtml = filled($htmlSource)
+                        ? $this->replaceVariables($htmlSource, $recipient->contact)
+                        : '';
+
+                    $renderedText = filled($textSource)
+                        ? $this->replaceVariables($textSource, $recipient->contact)
+                        : '';
+
+                    if (!filled($renderedHtml) && filled($renderedText)) {
+                        $renderedHtml = nl2br(e($renderedText));
+                    }
+
+                    $this->configureCampaignMailer($smtp);
+
+                    $mailManager->purge('bulk_mailer_campaign');
+
+                    Mail::mailer('bulk_mailer_campaign')
+                        ->to($normalizedRecipientEmail)
+                        ->send(new BulkMailerCampaignMail(
+                            smtp: $smtp,
+                            campaign: $campaign,
+                            contact: $recipient->contact,
+                            subjectLine: $renderedSubject,
+                            htmlBody: $renderedHtml,
+                            textBody: filled($renderedText) ? $renderedText : null,
+                        ));
+
+                    $recipient->update([
+                        'email' => $normalizedRecipientEmail,
+                        'bulk_mailer_smtp_account_id' => $smtp->id,
+                        'status' => BulkMailerCampaignRecipientStatus::Sent,
+                        'error_message' => null,
+                        'sent_at' => now(),
+                    ]);
+
+                    $this->incrementDailyUsage($smtp->id);
+                    $smtpHealthService->markSuccess($smtp);
+                    $eventService->logSent($recipient);
+                    $this->syncLiveCampaignCounts($campaign, BulkMailerCampaignStatus::Processing);
+                } catch (\Throwable $e) {
+                    $recipient->update([
+                        'bulk_mailer_smtp_account_id' => $smtp->id,
+                        'status' => BulkMailerCampaignRecipientStatus::Failed,
+                        'error_message' => mb_substr($e->getMessage(), 0, 1000),
+                        'sent_at' => null,
+                    ]);
+
+                    $smtpHealthService->markFailure($smtp, mb_substr($e->getMessage(), 0, 1000));
+                    $eventService->logFailed($recipient, mb_substr($e->getMessage(), 0, 1000));
+                    $this->syncLiveCampaignCounts($campaign, BulkMailerCampaignStatus::Processing);
+                } finally {
+                    $mailManager->purge('bulk_mailer_campaign');
+                }
+            }
+
+            $this->refreshCampaignCountsAndStatus($campaign);
+
+            $remainingPending = BulkMailerCampaignRecipient::query()
+                ->where('bulk_mailer_campaign_id', $campaign->id)
+                ->where('status', BulkMailerCampaignRecipientStatus::Pending->value)
+                ->exists();
+
+            $campaign->refresh();
+
+            if (
+                $remainingPending &&
+                $campaign->status?->value !== BulkMailerCampaignStatus::Paused->value &&
+                $campaign->status?->value !== BulkMailerCampaignStatus::Cancelled->value
+            ) {
+                static::dispatch($campaign->id);
+            }
+        } finally {
+            optional($lock)->release();
+        }
+    }
+
+    public function failed(\Throwable $exception): void
+    {
+        $campaign = BulkMailerCampaign::find($this->campaignId);
+
+        if (!$campaign) {
             return;
         }
 
@@ -50,157 +250,24 @@ class ProcessBulkMailerCampaign implements ShouldQueue
             return;
         }
 
-        $campaign->update([
-            'status' => BulkMailerCampaignStatus::Processing,
-            'started_at' => $campaign->started_at ?: now(),
-            'completed_at' => null,
-        ]);
-
-        $this->syncRecipients($campaign, $segmentService);
-        $this->syncLiveCampaignCounts($campaign);
-
-        $pendingRecipients = BulkMailerCampaignRecipient::query()
-            ->with('contact')
+        $hasPending = BulkMailerCampaignRecipient::query()
             ->where('bulk_mailer_campaign_id', $campaign->id)
             ->where('status', BulkMailerCampaignRecipientStatus::Pending->value)
-            ->orderBy('id')
-            ->get();
+            ->exists();
 
-        if ($pendingRecipients->isEmpty()) {
-            $this->refreshCampaignCountsAndStatus($campaign);
+        $campaign->update([
+            'status' => $hasPending ? BulkMailerCampaignStatus::Paused : BulkMailerCampaignStatus::Completed,
+            'pause_reason' => $hasPending
+                ? mb_substr('Queue job stopped unexpectedly: ' . $exception->getMessage(), 0, 1000)
+                : null,
+            'completed_at' => $hasPending ? null : now(),
+        ]);
 
-            return;
-        }
-
-        foreach ($pendingRecipients as $recipient) {
-            $campaign->refresh();
-
-            if ($campaign->status?->value === BulkMailerCampaignStatus::Paused->value) {
-                $this->syncLiveCampaignCounts($campaign, BulkMailerCampaignStatus::Paused);
-
-                return;
-            }
-
-            if ($campaign->status?->value === BulkMailerCampaignStatus::Cancelled->value) {
-                $this->syncLiveCampaignCounts($campaign, BulkMailerCampaignStatus::Cancelled, true);
-
-                return;
-            }
-
-            $smtp = $rotationService->resolveForCampaign($campaign->fresh('smtpGroup.smtpAccounts'));
-
-            if (!$smtp) {
-                $campaign->update([
-                    'status' => BulkMailerCampaignStatus::Paused,
-                ]);
-
-                $this->syncLiveCampaignCounts($campaign, BulkMailerCampaignStatus::Paused);
-
-                return;
-            }
-
-            try {
-                if (!$recipient->contact) {
-                    $recipient->update([
-                        'bulk_mailer_smtp_account_id' => $smtp->id,
-                        'status' => BulkMailerCampaignRecipientStatus::Failed,
-                        'error_message' => 'Recipient contact record not found.',
-                        'sent_at' => null,
-                    ]);
-
-                    $smtpHealthService->markFailure($smtp, 'Recipient contact record not found.');
-                    $eventService->logFailed($recipient, 'Recipient contact record not found.');
-                    $this->syncLiveCampaignCounts($campaign);
-
-                    continue;
-                }
-
-                $normalizedRecipientEmail = $this->normalizeEmail($recipient->email ?: $recipient->contact->email);
-
-                if (!$this->isValidEmail($normalizedRecipientEmail)) {
-                    $recipient->update([
-                        'bulk_mailer_smtp_account_id' => $smtp->id,
-                        'status' => BulkMailerCampaignRecipientStatus::Failed,
-                        'error_message' => 'Recipient email address is invalid.',
-                        'sent_at' => null,
-                    ]);
-
-                    $smtpHealthService->markFailure($smtp, 'Recipient email address is invalid.');
-                    $eventService->logFailed($recipient, 'Recipient email address is invalid.');
-                    $this->syncLiveCampaignCounts($campaign);
-
-                    continue;
-                }
-
-                $subjectTemplate = $campaign->subject ?: $campaign->template->subject;
-
-                if ($campaign->ab_testing_enabled) {
-                    $subjectTemplate = $recipient->subject_variant === 'B'
-                        ? ($campaign->subject_b ?: $subjectTemplate)
-                        : ($campaign->subject_a ?: $subjectTemplate);
-                }
-
-                $renderedSubject = $this->replaceVariables((string) $subjectTemplate, $recipient->contact);
-
-                $htmlSource = $campaign->template->html_content;
-                $textSource = $campaign->template->text_content;
-
-                $renderedHtml = filled($htmlSource)
-                    ? $this->replaceVariables($htmlSource, $recipient->contact)
-                    : '';
-
-                $renderedText = filled($textSource)
-                    ? $this->replaceVariables($textSource, $recipient->contact)
-                    : '';
-
-                if (!filled($renderedHtml) && filled($renderedText)) {
-                    $renderedHtml = nl2br(e($renderedText));
-                }
-
-                $this->configureCampaignMailer($smtp);
-
-                $mailManager->purge('bulk_mailer_campaign');
-
-                Mail::mailer('bulk_mailer_campaign')
-                    ->to($normalizedRecipientEmail)
-                    ->send(new BulkMailerCampaignMail(
-                        smtp: $smtp,
-                        campaign: $campaign,
-                        contact: $recipient->contact,
-                        subjectLine: $renderedSubject,
-                        htmlBody: $renderedHtml,
-                        textBody: filled($renderedText) ? $renderedText : null,
-                    ));
-
-                $recipient->update([
-                    'email' => $normalizedRecipientEmail,
-                    'bulk_mailer_smtp_account_id' => $smtp->id,
-                    'status' => BulkMailerCampaignRecipientStatus::Sent,
-                    'error_message' => null,
-                    'sent_at' => now(),
-                ]);
-
-                $this->incrementDailyUsage($smtp->id);
-                $smtpHealthService->markSuccess($smtp);
-                $eventService->logSent($recipient);
-                $this->syncLiveCampaignCounts($campaign);
-            } catch (\Throwable $e) {
-                $recipient->update([
-                    'bulk_mailer_smtp_account_id' => $smtp->id,
-                    'status' => BulkMailerCampaignRecipientStatus::Failed,
-                    'error_message' => mb_substr($e->getMessage(), 0, 1000),
-                    'sent_at' => null,
-                ]);
-
-                $smtpHealthService->markFailure($smtp, mb_substr($e->getMessage(), 0, 1000));
-                $eventService->logFailed($recipient, mb_substr($e->getMessage(), 0, 1000));
-                $this->syncLiveCampaignCounts($campaign);
-            } finally {
-                $mailManager->purge('bulk_mailer_campaign');
-            }
-        }
-
-        $this->refreshCampaignCountsAndStatus($campaign);
+        $this->syncLiveCampaignCounts(
+            $campaign,
+            $hasPending ? BulkMailerCampaignStatus::Paused : BulkMailerCampaignStatus::Completed,
+            !$hasPending
+        );
     }
 
     protected function syncRecipients(BulkMailerCampaign $campaign, BulkMailerSegmentService $segmentService): void
@@ -373,11 +440,13 @@ class ProcessBulkMailerCampaign implements ShouldQueue
             return;
         }
 
-        $this->syncLiveCampaignCounts(
-            $campaign,
-            $hasPending ? BulkMailerCampaignStatus::Paused : BulkMailerCampaignStatus::Completed,
-            !$hasPending
-        );
+        if ($hasPending) {
+            $this->syncLiveCampaignCounts($campaign, BulkMailerCampaignStatus::Processing);
+
+            return;
+        }
+
+        $this->syncLiveCampaignCounts($campaign, BulkMailerCampaignStatus::Completed, true);
     }
 
     protected function syncLiveCampaignCounts(
@@ -412,6 +481,76 @@ class ProcessBulkMailerCampaign implements ShouldQueue
         $updatePayload['completed_at'] = $markCompleted ? now() : null;
 
         $campaign->update($updatePayload);
+    }
+
+    protected function determinePauseReason(BulkMailerCampaign $campaign): string
+    {
+        $smtpAccounts = collect(data_get($campaign, 'smtpGroup.smtpAccounts', []));
+
+        if ($smtpAccounts->isEmpty()) {
+            return 'No SMTP account found in the selected SMTP group.';
+        }
+
+        $now = now();
+
+        $inactiveCount = $smtpAccounts->filter(function ($smtp) {
+            return !$smtp->is_active;
+        })->count();
+
+        $autoDisabledCount = $smtpAccounts->filter(function ($smtp) {
+            return filled($smtp->auto_disabled_at);
+        })->count();
+
+        $cooldownCount = $smtpAccounts->filter(function ($smtp) use ($now) {
+            return filled($smtp->cooldown_until) && $smtp->cooldown_until > $now;
+        })->count();
+
+        $dailyLimitCount = $smtpAccounts->filter(function ($smtp) {
+            if (!filled($smtp->daily_limit)) {
+                return false;
+            }
+
+            $sentToday = BulkMailerSmtpDailyUsage::query()
+                ->where('bulk_mailer_smtp_account_id', $smtp->id)
+                ->where('usage_date', now()->toDateString())
+                ->value('emails_sent');
+
+            return (int) $sentToday >= (int) $smtp->daily_limit;
+        })->count();
+
+        if ($dailyLimitCount === $smtpAccounts->count()) {
+            return 'Paused: all SMTP accounts reached their daily sending limit.';
+        }
+
+        if ($cooldownCount === $smtpAccounts->count()) {
+            return 'Paused: all SMTP accounts are in cooldown after recent failures.';
+        }
+
+        if ($inactiveCount === $smtpAccounts->count()) {
+            return 'Paused: all SMTP accounts are inactive.';
+        }
+
+        if ($autoDisabledCount === $smtpAccounts->count()) {
+            return 'Paused: all SMTP accounts were auto-disabled because of failures.';
+        }
+
+        if ($dailyLimitCount > 0) {
+            return 'Paused: some SMTP accounts reached their daily limit and no sendable SMTP is currently available.';
+        }
+
+        if ($cooldownCount > 0) {
+            return 'Paused: available SMTP accounts are cooling down after failures.';
+        }
+
+        if ($autoDisabledCount > 0) {
+            return 'Paused: SMTP accounts were auto-disabled and no active SMTP is currently available.';
+        }
+
+        if ($inactiveCount > 0) {
+            return 'Paused: SMTP accounts are inactive and no active SMTP is currently available.';
+        }
+
+        return 'Paused: no SMTP account is currently available for sending.';
     }
 
     protected function normalizeEmail(?string $email): string

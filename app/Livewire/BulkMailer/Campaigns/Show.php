@@ -6,12 +6,18 @@ use App\Enums\BulkMailerCampaignRecipientStatus;
 use App\Enums\BulkMailerCampaignStatus;
 use App\Jobs\ProcessBulkMailerCampaign;
 use App\Models\BulkMailerCampaign;
+use App\Models\BulkMailerCampaignRecipient;
 use App\Models\BulkMailerDeliveryEvent;
 use Livewire\Component;
+use Livewire\WithPagination;
 
 class Show extends Component
 {
+    use WithPagination;
+
     public BulkMailerCampaign $campaign;
+
+    public int $perPage = 50;
 
     public function mount(BulkMailerCampaign $campaign): void
     {
@@ -57,9 +63,22 @@ class Show extends Component
 
         ProcessBulkMailerCampaign::dispatch($this->campaign->id);
 
+        $this->resetPage();
         $this->refreshCampaign();
 
         session()->flash('success', "Retry started for {$failedCount} failed emails.");
+    }
+
+    public function getRecipientLogsProperty()
+    {
+        return BulkMailerCampaignRecipient::query()
+            ->with([
+                'contact.category',
+                'smtpAccount',
+            ])
+            ->where('bulk_mailer_campaign_id', $this->campaign->id)
+            ->latest('id')
+            ->paginate($this->perPage);
     }
 
     public function getVariantStatsProperty(): array
@@ -68,7 +87,7 @@ class Show extends Component
 
         return [
             'A' => [
-                'accepted' => (clone $recipientQuery)
+                'sent' => (clone $recipientQuery)
                     ->where('subject_variant', 'A')
                     ->where('status', BulkMailerCampaignRecipientStatus::Sent->value)
                     ->count(),
@@ -98,7 +117,7 @@ class Show extends Component
                     ->count(),
             ],
             'B' => [
-                'accepted' => (clone $recipientQuery)
+                'sent' => (clone $recipientQuery)
                     ->where('subject_variant', 'B')
                     ->where('status', BulkMailerCampaignRecipientStatus::Sent->value)
                     ->count(),
@@ -166,14 +185,14 @@ class Show extends Component
             'creator',
             'segment',
             'smtpGroup',
-            'recipients.contact.category',
-            'recipients.smtpAccount',
         ]);
     }
 
     public function render()
     {
-        return view('livewire.bulk-mailer.campaigns.show')
+        return view('livewire.bulk-mailer.campaigns.show', [
+            'recipientLogs' => $this->recipientLogs,
+        ])
             ->layout('layouts.app')
             ->title('Campaign Details');
     }
