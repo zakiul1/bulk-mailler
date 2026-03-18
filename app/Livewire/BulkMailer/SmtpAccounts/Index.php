@@ -65,6 +65,7 @@ class Index extends Component
     public function create(): void
     {
         $this->resetForm();
+        $this->password = '';
         $this->showFormModal = true;
     }
 
@@ -78,7 +79,10 @@ class Index extends Component
         $this->port = $smtp->port;
         $this->encryption = $smtp->encryption ?? '';
         $this->username = $smtp->username;
+
+        // Always keep password blank on edit so it is not accidentally overwritten.
         $this->password = '';
+
         $this->from_name = $smtp->from_name;
         $this->from_email = $smtp->from_email;
         $this->reply_to_email = $smtp->reply_to_email ?? '';
@@ -132,6 +136,7 @@ class Index extends Component
 
         $this->showFormModal = false;
         $this->resetForm();
+        $this->password = '';
 
         session()->flash('success', $message);
     }
@@ -167,7 +172,10 @@ class Index extends Component
     public function openTestModal(int $id): void
     {
         $this->testId = $id;
-        $this->test_email = auth()->user()->email ?? '';
+
+        // Keep blank; do not auto-fill logged-in user email.
+        $this->test_email = '';
+
         $this->resetValidation();
         $this->showTestModal = true;
     }
@@ -227,11 +235,21 @@ class Index extends Component
 
     public function closeModals(): void
     {
+        $wasFormModalOpen = $this->showFormModal;
+
         $this->showFormModal = false;
         $this->showDeleteModal = false;
         $this->showTestModal = false;
+
         $this->deleteId = null;
         $this->testId = null;
+        $this->test_email = '';
+        $this->password = '';
+
+        if ($wasFormModalOpen) {
+            $this->resetForm();
+        }
+
         $this->resetValidation();
     }
 

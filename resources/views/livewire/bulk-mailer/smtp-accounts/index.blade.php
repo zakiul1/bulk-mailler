@@ -33,7 +33,8 @@
         <div class="grid gap-4 md:grid-cols-3">
             <div class="border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
                 <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Search</label>
-                <input type="text" wire:model.live.debounce.300ms="search"
+                <input type="text" wire:model.live.debounce.300ms="search" name="smtp_search" id="smtp_search"
+                    autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
                     placeholder="Search by name, host, username, from email"
                     class="w-full border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
             </div>
@@ -63,22 +64,28 @@
                         <tr>
                             <th
                                 class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                SMTP</th>
+                                SMTP
+                            </th>
                             <th
                                 class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                From</th>
+                                From
+                            </th>
                             <th
                                 class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                Daily Limit</th>
+                                Daily Limit
+                            </th>
                             <th
                                 class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                Status</th>
+                                Status
+                            </th>
                             <th
                                 class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                Tags</th>
+                                Tags
+                            </th>
                             <th
                                 class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-                                Actions</th>
+                                Actions
+                            </th>
                         </tr>
                     </thead>
 
@@ -88,7 +95,8 @@
                                 <td class="px-4 py-4 align-top">
                                     <div class="font-medium text-zinc-900 dark:text-white">{{ $row->name }}</div>
                                     <div class="text-xs text-zinc-500 dark:text-zinc-400">
-                                        {{ $row->host }}:{{ $row->port }}</div>
+                                        {{ $row->host }}:{{ $row->port }}
+                                    </div>
                                     <div class="text-xs text-zinc-500 dark:text-zinc-400">{{ $row->username }}</div>
                                 </td>
 
@@ -96,23 +104,28 @@
                                     <div class="text-sm text-zinc-900 dark:text-white">{{ $row->from_name }}</div>
                                     <div class="text-xs text-zinc-500 dark:text-zinc-400">{{ $row->from_email }}</div>
                                     @if ($row->reply_to_email)
-                                        <div class="text-xs text-zinc-500 dark:text-zinc-400">Reply-To:
-                                            {{ $row->reply_to_email }}</div>
+                                        <div class="text-xs text-zinc-500 dark:text-zinc-400">
+                                            Reply-To: {{ $row->reply_to_email }}
+                                        </div>
                                     @endif
                                 </td>
 
                                 <td class="px-4 py-4 align-top">
                                     <div class="text-sm text-zinc-900 dark:text-white">
-                                        {{ number_format($row->daily_limit) }}</div>
-                                    <div class="text-xs text-zinc-500 dark:text-zinc-400">Sent today:
-                                        {{ number_format($row->sent_today) }}</div>
-                                    <div class="text-xs text-zinc-500 dark:text-zinc-400">Remaining:
-                                        {{ number_format($row->remaining_today) }}</div>
+                                        {{ number_format($row->daily_limit) }}
+                                    </div>
+                                    <div class="text-xs text-zinc-500 dark:text-zinc-400">
+                                        Sent today: {{ number_format($row->sent_today) }}
+                                    </div>
+                                    <div class="text-xs text-zinc-500 dark:text-zinc-400">
+                                        Remaining: {{ number_format($row->remaining_today) }}
+                                    </div>
                                 </td>
 
                                 <td class="px-4 py-4 align-top">
                                     <div class="text-sm text-zinc-900 dark:text-white">
-                                        {{ $row->is_active ? 'Active' : 'Inactive' }}</div>
+                                        {{ $row->is_active ? 'Active' : 'Inactive' }}
+                                    </div>
                                     <div class="text-xs text-zinc-500 dark:text-zinc-400">
                                         Health: {{ $row->health_status?->value ?? $row->health_status }}
                                     </div>
@@ -237,10 +250,18 @@
                     </div>
 
                     <div class="overflow-y-auto p-6">
+                        <form autocomplete="off">
+                            <input type="text" name="fake_smtp_username" autocomplete="username" class="hidden">
+                            <input type="password" name="fake_smtp_password" autocomplete="new-password"
+                                class="hidden">
+                        </form>
+
                         <div class="grid gap-4 md:grid-cols-2">
                             <div>
-                                <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Name</label>
-                                <input type="text" wire:model.defer="name"
+                                <label
+                                    class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Name</label>
+                                <input type="text" wire:model.defer="name" name="smtp_account_name"
+                                    id="smtp_account_name" autocomplete="off"
                                     class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
                                 @error('name')
                                     <div class="mt-1 text-xs text-red-600">{{ $message }}</div>
@@ -250,7 +271,9 @@
                             <div>
                                 <label
                                     class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Host</label>
-                                <input type="text" wire:model.defer="host"
+                                <input type="text" wire:model.defer="host" name="smtp_account_host"
+                                    id="smtp_account_host" autocomplete="off" autocapitalize="off" autocorrect="off"
+                                    spellcheck="false"
                                     class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
                                 @error('host')
                                     <div class="mt-1 text-xs text-red-600">{{ $message }}</div>
@@ -260,7 +283,8 @@
                             <div>
                                 <label
                                     class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Port</label>
-                                <input type="number" wire:model.defer="port"
+                                <input type="number" wire:model.defer="port" name="smtp_account_port"
+                                    id="smtp_account_port" autocomplete="off"
                                     class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
                                 @error('port')
                                     <div class="mt-1 text-xs text-red-600">{{ $message }}</div>
@@ -270,7 +294,8 @@
                             <div>
                                 <label
                                     class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Encryption</label>
-                                <select wire:model.defer="encryption"
+                                <select wire:model.defer="encryption" name="smtp_account_encryption"
+                                    id="smtp_account_encryption" autocomplete="off"
                                     class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
                                     <option value="">None</option>
                                     <option value="starttls">STARTTLS</option>
@@ -284,7 +309,9 @@
                             <div>
                                 <label
                                     class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Username</label>
-                                <input type="text" wire:model.defer="username"
+                                <input type="text" wire:model.defer="username" name="smtp_account_username"
+                                    id="smtp_account_username" autocomplete="off" autocapitalize="off"
+                                    autocorrect="off" spellcheck="false"
                                     class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
                                 @error('username')
                                     <div class="mt-1 text-xs text-red-600">{{ $message }}</div>
@@ -296,6 +323,10 @@
                                     Password {{ $editingId ? '(leave blank to keep existing)' : '' }}
                                 </label>
                                 <input type="password" wire:model.defer="password"
+                                    wire:key="smtp-password-{{ $editingId ?? 'new' }}"
+                                    name="smtp_account_password_{{ $editingId ?? 'new' }}"
+                                    id="smtp_account_password_{{ $editingId ?? 'new' }}" autocomplete="new-password"
+                                    autocapitalize="off" autocorrect="off" spellcheck="false"
                                     class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
                                 @error('password')
                                     <div class="mt-1 text-xs text-red-600">{{ $message }}</div>
@@ -303,9 +334,11 @@
                             </div>
 
                             <div>
-                                <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">From
-                                    Name</label>
-                                <input type="text" wire:model.defer="from_name"
+                                <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">
+                                    From Name
+                                </label>
+                                <input type="text" wire:model.defer="from_name" name="smtp_account_from_name"
+                                    id="smtp_account_from_name" autocomplete="off"
                                     class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
                                 @error('from_name')
                                     <div class="mt-1 text-xs text-red-600">{{ $message }}</div>
@@ -313,9 +346,12 @@
                             </div>
 
                             <div>
-                                <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">From
-                                    Email</label>
-                                <input type="email" wire:model.defer="from_email"
+                                <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">
+                                    From Email
+                                </label>
+                                <input type="email" wire:model.defer="from_email" name="smtp_account_from_email"
+                                    id="smtp_account_from_email" autocomplete="off" autocapitalize="off"
+                                    autocorrect="off" spellcheck="false"
                                     class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
                                 @error('from_email')
                                     <div class="mt-1 text-xs text-red-600">{{ $message }}</div>
@@ -323,9 +359,12 @@
                             </div>
 
                             <div>
-                                <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Reply-To
-                                    Email</label>
+                                <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">
+                                    Reply-To Email
+                                </label>
                                 <input type="email" wire:model.defer="reply_to_email"
+                                    name="smtp_account_reply_to_email" id="smtp_account_reply_to_email"
+                                    autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
                                     class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
                                 @error('reply_to_email')
                                     <div class="mt-1 text-xs text-red-600">{{ $message }}</div>
@@ -333,9 +372,11 @@
                             </div>
 
                             <div>
-                                <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Daily
-                                    Limit</label>
-                                <input type="number" wire:model.defer="daily_limit"
+                                <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">
+                                    Daily Limit
+                                </label>
+                                <input type="number" wire:model.defer="daily_limit" name="smtp_account_daily_limit"
+                                    id="smtp_account_daily_limit" autocomplete="off"
                                     class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
                                 @error('daily_limit')
                                     <div class="mt-1 text-xs text-red-600">{{ $message }}</div>
@@ -354,17 +395,19 @@
                             <div class="md:col-span-2">
                                 <label
                                     class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Tags</label>
-                                <input type="text" wire:model.defer="tag_names"
-                                    placeholder="marketing, backup, warmup"
+                                <input type="text" wire:model.defer="tag_names" name="smtp_account_tags"
+                                    id="smtp_account_tags" autocomplete="off" placeholder="marketing, backup, warmup"
                                     class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
-                                <div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Separate tags with commas.
+                                <div class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                                    Separate tags with commas.
                                 </div>
                             </div>
 
                             <div class="md:col-span-2">
                                 <label
                                     class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Notes</label>
-                                <textarea wire:model.defer="notes" rows="4"
+                                <textarea wire:model.defer="notes" name="smtp_account_notes" id="smtp_account_notes" rows="4"
+                                    autocomplete="off"
                                     class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"></textarea>
                                 @error('notes')
                                     <div class="mt-1 text-xs text-red-600">{{ $message }}</div>
@@ -429,9 +472,18 @@
                     </div>
 
                     <div class="overflow-y-auto p-6">
-                        <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">Test Email
-                            Address</label>
+                        <form autocomplete="off">
+                            <input type="email" name="fake_test_email" autocomplete="email" class="hidden">
+                        </form>
+
+                        <label class="mb-2 block text-sm font-medium text-zinc-900 dark:text-white">
+                            Test Email Address
+                        </label>
                         <input type="email" wire:model.defer="test_email"
+                            wire:key="smtp-test-email-{{ $testId ?? 'new' }}"
+                            name="smtp_test_email_{{ $testId ?? 'new' }}"
+                            id="smtp_test_email_{{ $testId ?? 'new' }}" autocomplete="off" autocapitalize="off"
+                            autocorrect="off" spellcheck="false"
                             class="w-full border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
                         @error('test_email')
                             <div class="mt-1 text-xs text-red-600">{{ $message }}</div>

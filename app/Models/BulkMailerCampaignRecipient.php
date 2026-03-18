@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\BulkMailerCampaignRecipientStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class BulkMailerCampaignRecipient extends Model
@@ -40,5 +41,29 @@ class BulkMailerCampaignRecipient extends Model
     public function smtpAccount(): BelongsTo
     {
         return $this->belongsTo(BulkMailerSmtpAccount::class, 'bulk_mailer_smtp_account_id');
+    }
+
+    public function scopePending(Builder $query): Builder
+    {
+        return $query->where('status', BulkMailerCampaignRecipientStatus::Pending->value);
+    }
+
+    public function scopeSent(Builder $query): Builder
+    {
+        return $query->where('status', BulkMailerCampaignRecipientStatus::Sent->value);
+    }
+
+    public function scopeFailed(Builder $query): Builder
+    {
+        return $query->where('status', BulkMailerCampaignRecipientStatus::Failed->value);
+    }
+
+    public function markAsPendingForRetry(): bool
+    {
+        return $this->update([
+            'status' => BulkMailerCampaignRecipientStatus::Pending->value,
+            'error_message' => null,
+            'sent_at' => null,
+        ]);
     }
 }

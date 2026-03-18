@@ -2,6 +2,7 @@
 
 namespace App\Livewire\BulkMailer\Campaigns;
 
+use App\Enums\BulkMailerCampaignRecipientStatus;
 use App\Enums\BulkMailerCampaignStatus;
 use App\Jobs\ProcessBulkMailerCampaign;
 use App\Mail\BulkMailerCampaignMail;
@@ -85,6 +86,8 @@ class Index extends Component
     public function create(): void
     {
         $this->resetForm();
+        $this->test_email = '';
+        $this->reschedule_at = '';
         $this->showFormModal = true;
     }
 
@@ -105,6 +108,8 @@ class Index extends Component
         $this->bulk_mailer_smtp_group_id = (string) ($campaign->bulk_mailer_smtp_group_id ?? '');
         $this->selected_lists = $campaign->lists->pluck('id')->map(fn($id) => (string) $id)->all();
         $this->listSearch = '';
+        $this->test_email = '';
+        $this->reschedule_at = '';
 
         $this->resetValidation();
         $this->showFormModal = true;
@@ -151,6 +156,8 @@ class Index extends Component
 
         $this->showFormModal = false;
         $this->resetForm();
+        $this->test_email = '';
+        $this->reschedule_at = '';
         $this->resetPage();
 
         session()->flash('success', $message);
@@ -220,7 +227,7 @@ class Index extends Component
     public function openTestModal(int $id): void
     {
         $this->testId = $id;
-        $this->test_email = auth()->user()->email ?? '';
+        $this->test_email = '';
         $this->resetValidation();
         $this->showTestModal = true;
     }
@@ -251,9 +258,11 @@ class Index extends Component
             $this->configureCampaignTestMailer($smtp);
             $mailManager->purge('bulk_mailer_campaign_test');
 
+            $normalizedTestEmail = $this->normalizeEmail($this->test_email);
+
             $sampleData = [
-                '{{name}}' => $this->test_email,
-                '{{email}}' => $this->test_email,
+                '{{name}}' => $normalizedTestEmail,
+                '{{email}}' => $normalizedTestEmail,
                 '{{first_name}}' => 'Test',
                 '{{last_name}}' => 'Recipient',
             ];
@@ -285,7 +294,7 @@ class Index extends Component
 
             $testContact = new BulkMailerContact([
                 'id' => 0,
-                'email' => $this->test_email,
+                'email' => $normalizedTestEmail,
                 'first_name' => 'Test',
                 'last_name' => 'Recipient',
             ]);
@@ -293,7 +302,7 @@ class Index extends Component
             $testContact->exists = false;
 
             Mail::mailer('bulk_mailer_campaign_test')
-                ->to($this->test_email)
+                ->to($normalizedTestEmail)
                 ->send(new BulkMailerCampaignMail(
                     smtp: $smtp,
                     campaign: $campaign,
@@ -391,7 +400,7 @@ class Index extends Component
 
         BulkMailerCampaignRecipient::query()
             ->where('bulk_mailer_campaign_id', $campaign->id)
-            ->where('status', 'pending')
+            ->where('status', BulkMailerCampaignRecipientStatus::Pending->value)
             ->update(['error_message' => null]);
 
         $campaign->update([
@@ -403,6 +412,49 @@ class Index extends Component
 
         $this->resetPage();
         session()->flash('success', 'Campaign resumed successfully.');
+    }
+
+    public function retryFailed(int $id): void
+    {
+        $campaign = BulkMailerCampaign::findOrFail($id);
+
+        $failedCount = BulkMailerCampaignRecipient::query()
+            ->where('bulk_mailer_campaign_id', $campaign->id)
+            ->where('status', BulkMailerCampaignRecipientStatus::Failed->value)
+            ->count();
+
+        if ($failedCount === 0) {
+            session()->flash('error', 'No failed emails found to retry.');
+
+            return;
+        }
+
+        BulkMailerCampaignRecipient::query()
+            ->where('bulk_mailer_campaign_id', $campaign->id)
+            ->where('status', BulkMailerCampaignRecipientStatus::Failed->value)
+            ->update([
+                'status' => BulkMailerCampaignRecipientStatus::Pending->value,
+                'error_message' => null,
+                'sent_at' => null,
+            ]);
+
+        $sentCount = BulkMailerCampaignRecipient::query()
+            ->where('bulk_mailer_campaign_id', $campaign->id)
+            ->where('status', BulkMailerCampaignRecipientStatus::Sent->value)
+            ->count();
+
+        $campaign->update([
+            'status' => BulkMailerCampaignStatus::Processing,
+            'sent_count' => $sentCount,
+            'failed_count' => 0,
+            'completed_at' => null,
+            'started_at' => $campaign->started_at ?: now(),
+        ]);
+
+        ProcessBulkMailerCampaign::dispatch($campaign->id);
+
+        $this->resetPage();
+        session()->flash('success', "Retry started for {$failedCount} failed emails.");
     }
 
     public function cancelCampaign(int $id): void
@@ -435,14 +487,25 @@ class Index extends Component
 
     public function closeModals(): void
     {
+        $wasFormModalOpen = $this->showFormModal;
+
         $this->showFormModal = false;
         $this->showDeleteModal = false;
         $this->showTestModal = false;
         $this->showRescheduleModal = false;
+
         $this->deleteId = null;
         $this->testId = null;
         $this->rescheduleId = null;
+
+        $this->test_email = '';
+        $this->reschedule_at = '';
         $this->listSearch = '';
+
+        if ($wasFormModalOpen) {
+            $this->resetForm();
+        }
+
         $this->resetValidation();
     }
 
@@ -466,6 +529,8 @@ class Index extends Component
         $this->bulk_mailer_smtp_group_id = '';
         $this->selected_lists = [];
         $this->listSearch = '';
+        $this->test_email = '';
+        $this->reschedule_at = '';
         $this->resetValidation();
     }
 
@@ -562,6 +627,11 @@ class Index extends Component
         $host = trim($host, "/ \t\n\r\0\x0B");
 
         return $host;
+    }
+
+    protected function normalizeEmail(?string $email): string
+    {
+        return mb_strtolower(trim((string) $email));
     }
 
     protected function mapEncryption(?string $encryption): ?string

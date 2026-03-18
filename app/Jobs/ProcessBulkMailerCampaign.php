@@ -63,6 +63,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
             ->with('contact')
             ->where('bulk_mailer_campaign_id', $campaign->id)
             ->where('status', BulkMailerCampaignRecipientStatus::Pending->value)
+            ->orderBy('id')
             ->get();
 
         if ($pendingRecipients->isEmpty()) {
@@ -104,6 +105,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
                         'bulk_mailer_smtp_account_id' => $smtp->id,
                         'status' => BulkMailerCampaignRecipientStatus::Failed,
                         'error_message' => 'Recipient contact record not found.',
+                        'sent_at' => null,
                     ]);
 
                     $smtpHealthService->markFailure($smtp, 'Recipient contact record not found.');
@@ -120,6 +122,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
                         'bulk_mailer_smtp_account_id' => $smtp->id,
                         'status' => BulkMailerCampaignRecipientStatus::Failed,
                         'error_message' => 'Recipient email address is invalid.',
+                        'sent_at' => null,
                     ]);
 
                     $smtpHealthService->markFailure($smtp, 'Recipient email address is invalid.');
@@ -186,6 +189,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
                     'bulk_mailer_smtp_account_id' => $smtp->id,
                     'status' => BulkMailerCampaignRecipientStatus::Failed,
                     'error_message' => mb_substr($e->getMessage(), 0, 1000),
+                    'sent_at' => null,
                 ]);
 
                 $smtpHealthService->markFailure($smtp, mb_substr($e->getMessage(), 0, 1000));
