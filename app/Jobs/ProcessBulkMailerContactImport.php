@@ -19,6 +19,8 @@ class ProcessBulkMailerContactImport implements ShouldQueue
 
     public int $timeout = 3600;
 
+    protected int $chunkSize = 500;
+
     public function __construct(public int $importId)
     {
     }
@@ -27,23 +29,27 @@ class ProcessBulkMailerContactImport implements ShouldQueue
     {
         $import = BulkMailerContactImport::find($this->importId);
 
-        if (! $import) {
+        if (!$import) {
             return;
         }
 
         $import->update([
             'status' => 'processing',
             'error_message' => null,
+            'completed_at' => null,
         ]);
 
         try {
-            $emails = $this->loadEmails($import);
+            if (blank($import->stored_file_path)) {
+                throw new \RuntimeException('Import source file path is missing.');
+            }
 
-            $import->update([
-                'total_read' => count($emails),
-            ]);
+            if (!Storage::exists($import->stored_file_path)) {
+                throw new \RuntimeException('Import source file not found: ' . $import->stored_file_path);
+            }
 
             $stats = [
+                'total_read' => 0,
                 'processed_count' => 0,
                 'valid_count' => 0,
                 'invalid_count' => 0,
@@ -53,55 +59,17 @@ class ProcessBulkMailerContactImport implements ShouldQueue
 
             $seenInImport = [];
 
-            foreach (array_chunk($emails, 1000) as $chunk) {
-                $normalizedValidEmails = [];
-
-                foreach ($chunk as $rawEmail) {
-                    $normalized = $this->normalizeEmail($rawEmail);
-
-                    if ($normalized === null) {
-                        continue;
-                    }
-
-                    $stats['processed_count']++;
-
-                    if (isset($seenInImport[$normalized])) {
-                        $stats['duplicate_count']++;
-                        continue;
-                    }
-
-                    $seenInImport[$normalized] = true;
-
-                    if (! $this->isValidEmail($normalized)) {
-                        $stats['invalid_count']++;
-                        continue;
-                    }
-
-                    $stats['valid_count']++;
-                    $normalizedValidEmails[] = $normalized;
-                }
-
-                if (! empty($normalizedValidEmails)) {
-                    $inserted = $this->insertChunk(
-                        categoryId: $import->bulk_mailer_contact_list_id,
-                        emails: $normalizedValidEmails,
-                        duplicateCounter: $stats['duplicate_count']
-                    );
-
-                    $stats['inserted_count'] += $inserted;
-                }
-
-                $import->update([
-                    'processed_count' => $stats['processed_count'],
-                    'valid_count' => $stats['valid_count'],
-                    'invalid_count' => $stats['invalid_count'],
-                    'duplicate_count' => $stats['duplicate_count'],
-                    'inserted_count' => $stats['inserted_count'],
-                ]);
+            if ($import->source_type === 'file') {
+                $this->processFileInChunks($import, $stats, $seenInImport);
+            } elseif ($import->source_type === 'text') {
+                $this->processTextInChunks($import, $stats, $seenInImport);
+            } else {
+                throw new \RuntimeException('Unsupported import source type: ' . $import->source_type);
             }
 
             $import->update([
                 'status' => 'completed',
+                'total_read' => $stats['total_read'],
                 'processed_count' => $stats['processed_count'],
                 'valid_count' => $stats['valid_count'],
                 'invalid_count' => $stats['invalid_count'],
@@ -119,45 +87,16 @@ class ProcessBulkMailerContactImport implements ShouldQueue
         }
     }
 
-    protected function loadEmails(BulkMailerContactImport $import): array
+    protected function processFileInChunks(BulkMailerContactImport $import, array &$stats, array &$seenInImport): void
     {
-        if (blank($import->stored_file_path)) {
-            return [];
-        }
-
-        if (! Storage::exists($import->stored_file_path)) {
-            throw new \RuntimeException('Import source file not found: ' . $import->stored_file_path);
-        }
-
-        if ($import->source_type === 'file') {
-            return $this->extractEmailsFromFile(Storage::path($import->stored_file_path));
-        }
-
-        if ($import->source_type === 'text') {
-            $content = Storage::get($import->stored_file_path);
-
-            return $this->extractEmailsFromText($content ?: '');
-        }
-
-        return [];
-    }
-
-    protected function extractEmailsFromText(string $text): array
-    {
-        $parts = preg_split('/[\s,;]+/', $text) ?: [];
-
-        return array_values(array_filter($parts, fn ($value) => filled(trim($value))));
-    }
-
-    protected function extractEmailsFromFile(string $path): array
-    {
-        $emails = [];
-
+        $path = Storage::path($import->stored_file_path);
         $handle = fopen($path, 'r');
 
         if ($handle === false) {
-            return $emails;
+            throw new \RuntimeException('Unable to open import file: ' . $path);
         }
+
+        $chunk = [];
 
         try {
             while (($line = fgets($handle)) !== false) {
@@ -169,17 +108,116 @@ class ProcessBulkMailerContactImport implements ShouldQueue
                     foreach ($parts as $part) {
                         $part = trim($part);
 
-                        if ($part !== '') {
-                            $emails[] = $part;
+                        if ($part === '') {
+                            continue;
+                        }
+
+                        $stats['total_read']++;
+                        $chunk[] = $part;
+
+                        if (count($chunk) >= $this->chunkSize) {
+                            $this->processChunk($import, $chunk, $stats, $seenInImport);
+                            $chunk = [];
+                            $this->persistProgress($import, $stats);
                         }
                     }
                 }
             }
+
+            if (!empty($chunk)) {
+                $this->processChunk($import, $chunk, $stats, $seenInImport);
+                $this->persistProgress($import, $stats);
+            }
         } finally {
             fclose($handle);
         }
+    }
 
-        return $emails;
+    protected function processTextInChunks(BulkMailerContactImport $import, array &$stats, array &$seenInImport): void
+    {
+        $content = Storage::get($import->stored_file_path) ?: '';
+        $parts = preg_split('/[\s,;]+/', $content) ?: [];
+        $chunk = [];
+
+        foreach ($parts as $part) {
+            $part = trim((string) $part);
+
+            if ($part === '') {
+                continue;
+            }
+
+            $stats['total_read']++;
+            $chunk[] = $part;
+
+            if (count($chunk) >= $this->chunkSize) {
+                $this->processChunk($import, $chunk, $stats, $seenInImport);
+                $chunk = [];
+                $this->persistProgress($import, $stats);
+            }
+        }
+
+        if (!empty($chunk)) {
+            $this->processChunk($import, $chunk, $stats, $seenInImport);
+            $this->persistProgress($import, $stats);
+        }
+    }
+
+    protected function processChunk(
+        BulkMailerContactImport $import,
+        array $rawEmails,
+        array &$stats,
+        array &$seenInImport
+    ): void {
+        $normalizedValidEmails = [];
+
+        foreach ($rawEmails as $rawEmail) {
+            $normalized = $this->normalizeEmail($rawEmail);
+
+            if ($normalized === null) {
+                continue;
+            }
+
+            $stats['processed_count']++;
+
+            if (isset($seenInImport[$normalized])) {
+                $stats['duplicate_count']++;
+                continue;
+            }
+
+            $seenInImport[$normalized] = true;
+
+            if (!$this->isValidEmail($normalized)) {
+                $stats['invalid_count']++;
+                continue;
+            }
+
+            $stats['valid_count']++;
+            $normalizedValidEmails[] = $normalized;
+        }
+
+        if (empty($normalizedValidEmails)) {
+            return;
+        }
+
+        $inserted = $this->insertChunk(
+            listId: (int) $import->bulk_mailer_contact_list_id,
+            emails: $normalizedValidEmails,
+            duplicateCounter: $stats['duplicate_count']
+        );
+
+        $stats['inserted_count'] += $inserted;
+    }
+
+    protected function persistProgress(BulkMailerContactImport $import, array $stats): void
+    {
+        $import->update([
+            'total_read' => $stats['total_read'],
+            'processed_count' => $stats['processed_count'],
+            'valid_count' => $stats['valid_count'],
+            'invalid_count' => $stats['invalid_count'],
+            'duplicate_count' => $stats['duplicate_count'],
+            'inserted_count' => $stats['inserted_count'],
+        ]);
     }
 
     protected function normalizeEmail(string $email): ?string
@@ -198,10 +236,10 @@ class ProcessBulkMailerContactImport implements ShouldQueue
         )->passes();
     }
 
-    protected function insertChunk(int $categoryId, array $emails, int &$duplicateCounter): int
+    protected function insertChunk(int $listId, array $emails, int &$duplicateCounter): int
     {
         $existingEmails = BulkMailerContact::query()
-            ->where('bulk_mailer_contact_list_id', $categoryId)
+            ->where('bulk_mailer_contact_list_id', $listId)
             ->whereIn('email', $emails)
             ->pluck('email')
             ->all();
@@ -218,7 +256,7 @@ class ProcessBulkMailerContactImport implements ShouldQueue
             }
 
             $rows[] = [
-                'bulk_mailer_contact_list_id' => $categoryId,
+                'bulk_mailer_contact_list_id' => $listId,
                 'email' => $email,
                 'created_at' => $now,
                 'updated_at' => $now,

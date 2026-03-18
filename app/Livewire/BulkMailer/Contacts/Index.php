@@ -5,6 +5,7 @@ namespace App\Livewire\BulkMailer\Contacts;
 use App\Jobs\ProcessBulkMailerContactDelete;
 use App\Models\BulkMailerContact;
 use App\Models\BulkMailerContactDeleteJob;
+use App\Models\BulkMailerContactImport;
 use App\Models\BulkMailerContactList;
 use Illuminate\Database\Eloquent\Builder;
 use Livewire\Component;
@@ -27,6 +28,7 @@ class Index extends Component
 
     public string $copiedContactsText = '';
     public ?int $latestDeleteJobId = null;
+    public ?int $latestImportId = null;
 
     protected $queryString = [
         'search' => ['except' => ''],
@@ -36,6 +38,7 @@ class Index extends Component
     public function mount(): void
     {
         $this->latestDeleteJobId = null;
+        $this->latestImportId = null;
     }
 
     public function updatingSearch(): void
@@ -52,7 +55,7 @@ class Index extends Component
 
     public function updatedSelectAllMatching(bool $value): void
     {
-        if (! $value) {
+        if (!$value) {
             $this->selected = [];
 
             return;
@@ -60,7 +63,7 @@ class Index extends Component
 
         $this->selected = $this->filteredQuery()
             ->pluck('id')
-            ->map(fn ($id) => (string) $id)
+            ->map(fn($id) => (string) $id)
             ->all();
     }
 
@@ -100,7 +103,7 @@ class Index extends Component
     public function bulkDelete(): void
     {
         $ids = collect($this->selected)
-            ->map(fn ($id) => (int) $id)
+            ->map(fn($id) => (int) $id)
             ->filter()
             ->unique()
             ->values()
@@ -116,7 +119,7 @@ class Index extends Component
 
         $deleteJob = BulkMailerContactDeleteJob::create([
             'bulk_mailer_contact_list_id' => $this->listFilter !== 'all' ? (int) $this->listFilter : null,
-            'status' => 'queued',
+            'status' => 'processing',
             'selection_type' => 'selected',
             'filters' => [
                 'ids' => $ids,
@@ -128,20 +131,22 @@ class Index extends Component
 
         $this->latestDeleteJobId = $deleteJob->id;
 
-        ProcessBulkMailerContactDelete::dispatch($deleteJob->id);
+        app(ProcessBulkMailerContactDelete::class, [
+            'deleteJobId' => $deleteJob->id,
+        ])->handle();
 
         $this->showBulkDeleteModal = false;
         $this->resetSelection();
         $this->resetPage();
 
-        session()->flash('success', 'Bulk delete started.');
-        $this->dispatch('notify', type: 'success', message: 'Bulk delete started.');
+        session()->flash('success', 'Bulk delete started successfully.');
+        $this->dispatch('notify', type: 'success', message: 'Bulk delete started successfully.');
     }
 
     public function copySelected(): void
     {
         $ids = collect($this->selected)
-            ->map(fn ($id) => (int) $id)
+            ->map(fn($id) => (int) $id)
             ->filter()
             ->unique()
             ->values();
@@ -170,15 +175,25 @@ class Index extends Component
         // Bulk delete progress polling only.
     }
 
+    public function pollImportJob(): void
+    {
+        // Import progress polling only.
+    }
+
+    public function setLatestImportId(int $id): void
+    {
+        $this->latestImportId = $id;
+    }
+
     public function clearDeleteJob(): void
     {
-        if (! $this->latestDeleteJobId) {
+        if (!$this->latestDeleteJobId) {
             return;
         }
 
         $job = BulkMailerContactDeleteJob::find($this->latestDeleteJobId);
 
-        if (! $job) {
+        if (!$job) {
             $this->latestDeleteJobId = null;
 
             return;
@@ -186,6 +201,25 @@ class Index extends Component
 
         if (in_array($job->status, ['completed', 'failed'], true)) {
             $this->latestDeleteJobId = null;
+        }
+    }
+
+    public function clearImportJob(): void
+    {
+        if (!$this->latestImportId) {
+            return;
+        }
+
+        $import = BulkMailerContactImport::find($this->latestImportId);
+
+        if (!$import) {
+            $this->latestImportId = null;
+
+            return;
+        }
+
+        if (in_array($import->status, ['completed', 'failed'], true)) {
+            $this->latestImportId = null;
         }
     }
 
@@ -240,6 +274,15 @@ class Index extends Component
             return BulkMailerContactDeleteJob::query()
                 ->with('category')
                 ->find($this->latestDeleteJobId);
+        }
+
+        return null;
+    }
+
+    public function getLatestImportProperty(): ?BulkMailerContactImport
+    {
+        if ($this->latestImportId) {
+            return BulkMailerContactImport::find($this->latestImportId);
         }
 
         return null;

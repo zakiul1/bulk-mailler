@@ -26,14 +26,14 @@ class Create extends Component
 
     public function mount(): void
     {
-        if (! in_array($this->activeTab, ['text', 'file'], true)) {
+        if (!in_array($this->activeTab, ['text', 'file'], true)) {
             $this->activeTab = 'text';
         }
     }
 
     public function switchTab(string $tab): void
     {
-        if (! in_array($tab, ['text', 'file'], true)) {
+        if (!in_array($tab, ['text', 'file'], true)) {
             return;
         }
 
@@ -90,7 +90,7 @@ class Create extends Component
             'source_type' => $sourceType,
             'source_name' => $sourceName,
             'stored_file_path' => $storedFilePath,
-            'status' => 'queued',
+            'status' => 'processing',
             'created_by' => auth()->id(),
         ]);
 
@@ -99,25 +99,27 @@ class Create extends Component
         $this->import_file = null;
         $this->resetValidation();
 
-        ProcessBulkMailerContactImport::dispatch($import->id);
+        app(ProcessBulkMailerContactImport::class, [
+            'importId' => $import->id,
+        ])->handle();
 
-        session()->flash('success', 'Import queued successfully.');
+        session()->flash('success', 'Import started successfully.');
         $this->dispatch(
             'notify',
             type: 'success',
-            message: 'Import queued successfully.'
+            message: 'Import started successfully.'
         );
     }
 
     public function refreshImport(): void
     {
-        if (! $this->latestImportId) {
+        if (!$this->latestImportId) {
             return;
         }
 
         $import = BulkMailerContactImport::find($this->latestImportId);
 
-        if (! $import) {
+        if (!$import) {
             $this->latestImportId = null;
             return;
         }

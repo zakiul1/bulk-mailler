@@ -34,7 +34,7 @@ class Index extends Component
     public string $name = '';
     public string $host = '';
     public int|string $port = 587;
-    public string $encryption = 'tls';
+    public string $encryption = 'starttls';
     public string $username = '';
     public string $password = '';
     public string $from_name = '';
@@ -158,7 +158,7 @@ class Index extends Component
         $smtp = BulkMailerSmtpAccount::findOrFail($id);
 
         $smtp->update([
-            'is_active' => ! $smtp->is_active,
+            'is_active' => !$smtp->is_active,
         ]);
 
         session()->flash('success', 'SMTP account status updated.');
@@ -241,7 +241,7 @@ class Index extends Component
         $this->name = '';
         $this->host = '';
         $this->port = 587;
-        $this->encryption = 'tls';
+        $this->encryption = 'starttls';
         $this->username = '';
         $this->password = '';
         $this->from_name = '';
@@ -264,7 +264,7 @@ class Index extends Component
             'name' => ['required', 'string', 'max:255'],
             'host' => ['required', 'string', 'max:255'],
             'port' => ['required', 'integer', 'min:1', 'max:65535'],
-            'encryption' => ['nullable', Rule::in(['', 'tls', 'ssl'])],
+            'encryption' => ['nullable', Rule::in(['', 'starttls', 'ssl'])],
             'username' => ['required', 'string', 'max:255'],
             'password' => $passwordRules,
             'from_name' => ['required', 'string', 'max:255'],
@@ -296,7 +296,7 @@ class Index extends Component
     protected function syncTagIds(): array
     {
         $names = collect(explode(',', $this->tag_names))
-            ->map(fn ($tag) => trim($tag))
+            ->map(fn($tag) => trim($tag))
             ->filter()
             ->unique()
             ->values();
@@ -325,9 +325,9 @@ class Index extends Component
     {
         Config::set('mail.mailers.bulk_mailer_test', [
             'transport' => 'smtp',
-            'host' => $smtp->host,
+            'host' => $this->normalizeHost($smtp->host),
             'port' => $smtp->port,
-            'encryption' => blank($smtp->encryption) ? null : $smtp->encryption,
+            'encryption' => $this->mapEncryption($smtp->encryption),
             'username' => $smtp->username,
             'password' => $smtp->decrypted_password,
             'timeout' => 30,
@@ -339,17 +339,17 @@ class Index extends Component
     {
         $configuredEhloDomain = (string) config('mail.ehlo_domain');
 
-        if (filled($configuredEhloDomain) && ! $this->isLocalhostHost($configuredEhloDomain)) {
+        if (filled($configuredEhloDomain) && !$this->isLocalhostHost($configuredEhloDomain)) {
             return $configuredEhloDomain;
         }
 
         $appHost = (string) parse_url((string) config('app.url'), PHP_URL_HOST);
 
-        if (filled($appHost) && ! $this->isLocalhostHost($appHost)) {
+        if (filled($appHost) && !$this->isLocalhostHost($appHost)) {
             return $appHost;
         }
 
-        if ($smtp && filled($smtp->host) && ! $this->isLocalhostHost((string) $smtp->host)) {
+        if ($smtp && filled($smtp->host) && !$this->isLocalhostHost((string) $smtp->host)) {
             return (string) $smtp->host;
         }
 
@@ -369,6 +369,7 @@ class Index extends Component
         $validated['notes'] = isset($validated['notes'])
             ? trim((string) $validated['notes'])
             : '';
+        $validated['encryption'] = $this->normalizeEncryption($validated['encryption'] ?? '');
 
         return $validated;
     }
@@ -410,6 +411,30 @@ class Index extends Component
         return $host;
     }
 
+    protected function normalizeEncryption(?string $encryption): string
+    {
+        $encryption = mb_strtolower(trim((string) $encryption));
+
+        return match ($encryption) {
+            'tls' => 'starttls',
+            'ssl/tls' => 'ssl',
+            'none' => '',
+            default => $encryption,
+        };
+    }
+
+    protected function mapEncryption(?string $encryption): ?string
+    {
+        $encryption = mb_strtolower(trim((string) $encryption));
+
+        return match ($encryption) {
+            '', 'none' => null,
+            'starttls' => 'tls',
+            'ssl', 'ssl/tls' => 'ssl',
+            default => $encryption,
+        };
+    }
+
     protected function sanitizeText(?string $value): string
     {
         $value = trim((string) $value);
@@ -422,7 +447,7 @@ class Index extends Component
     {
         $value = trim((string) $value);
 
-        if ($value === '' || ! str_contains($value, '@')) {
+        if ($value === '' || !str_contains($value, '@')) {
             return null;
         }
 
@@ -451,8 +476,8 @@ class Index extends Component
                         ->orWhere('from_email', 'like', '%' . $this->search . '%');
                 });
             })
-            ->when($this->statusFilter === 'active', fn ($query) => $query->where('is_active', true))
-            ->when($this->statusFilter === 'inactive', fn ($query) => $query->where('is_active', false))
+            ->when($this->statusFilter === 'active', fn($query) => $query->where('is_active', true))
+            ->when($this->statusFilter === 'inactive', fn($query) => $query->where('is_active', false))
             ->latest()
             ->paginate(10);
     }

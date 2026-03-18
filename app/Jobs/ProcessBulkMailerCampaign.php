@@ -42,7 +42,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
     ): void {
         $campaign = BulkMailerCampaign::with(['template', 'lists', 'segment', 'smtpGroup.smtpAccounts'])->find($this->campaignId);
 
-        if (! $campaign || ! $campaign->template || ! $campaign->smtpGroup) {
+        if (!$campaign || !$campaign->template || !$campaign->smtpGroup) {
             return;
         }
 
@@ -88,7 +88,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
 
             $smtp = $rotationService->resolveForCampaign($campaign->fresh('smtpGroup.smtpAccounts'));
 
-            if (! $smtp) {
+            if (!$smtp) {
                 $campaign->update([
                     'status' => BulkMailerCampaignStatus::Paused,
                 ]);
@@ -99,7 +99,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
             }
 
             try {
-                if (! $recipient->contact) {
+                if (!$recipient->contact) {
                     $recipient->update([
                         'bulk_mailer_smtp_account_id' => $smtp->id,
                         'status' => BulkMailerCampaignRecipientStatus::Failed,
@@ -115,7 +115,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
 
                 $normalizedRecipientEmail = $this->normalizeEmail($recipient->email ?: $recipient->contact->email);
 
-                if (! $this->isValidEmail($normalizedRecipientEmail)) {
+                if (!$this->isValidEmail($normalizedRecipientEmail)) {
                     $recipient->update([
                         'bulk_mailer_smtp_account_id' => $smtp->id,
                         'status' => BulkMailerCampaignRecipientStatus::Failed,
@@ -150,7 +150,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
                     ? $this->replaceVariables($textSource, $recipient->contact)
                     : '';
 
-                if (! filled($renderedHtml) && filled($renderedText)) {
+                if (!filled($renderedHtml) && filled($renderedText)) {
                     $renderedHtml = nl2br(e($renderedText));
                 }
 
@@ -205,7 +205,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
 
         $query = BulkMailerContact::query();
 
-        if (! empty($listIds)) {
+        if (!empty($listIds)) {
             $query->whereIn('bulk_mailer_contact_list_id', $listIds);
         }
 
@@ -223,7 +223,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
             ->filter(function (BulkMailerContact $contact) {
                 $email = $this->normalizeEmail($contact->email);
 
-                if (! $this->isValidEmail($email)) {
+                if (!$this->isValidEmail($email)) {
                     return false;
                 }
 
@@ -251,7 +251,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
                     : null,
             ];
 
-            if (! $existingRecipient) {
+            if (!$existingRecipient) {
                 $payload['status'] = BulkMailerCampaignRecipientStatus::Pending->value;
 
                 BulkMailerCampaignRecipient::create([
@@ -317,9 +317,9 @@ class ProcessBulkMailerCampaign implements ShouldQueue
     {
         Config::set('mail.mailers.bulk_mailer_campaign', [
             'transport' => 'smtp',
-            'host' => $smtp->host,
+            'host' => $this->normalizeHost($smtp->host),
             'port' => $smtp->port,
-            'encryption' => blank($smtp->encryption) ? null : $smtp->encryption,
+            'encryption' => $this->mapEncryption($smtp->encryption),
             'username' => $smtp->username,
             'password' => $smtp->decrypted_password,
             'timeout' => 90,
@@ -331,17 +331,17 @@ class ProcessBulkMailerCampaign implements ShouldQueue
     {
         $configuredEhloDomain = (string) config('mail.ehlo_domain');
 
-        if (filled($configuredEhloDomain) && ! $this->isLocalhostHost($configuredEhloDomain)) {
+        if (filled($configuredEhloDomain) && !$this->isLocalhostHost($configuredEhloDomain)) {
             return $configuredEhloDomain;
         }
 
         $appHost = (string) parse_url((string) config('app.url'), PHP_URL_HOST);
 
-        if (filled($appHost) && ! $this->isLocalhostHost($appHost)) {
+        if (filled($appHost) && !$this->isLocalhostHost($appHost)) {
             return $appHost;
         }
 
-        if ($smtp && filled($smtp->host) && ! $this->isLocalhostHost((string) $smtp->host)) {
+        if ($smtp && filled($smtp->host) && !$this->isLocalhostHost((string) $smtp->host)) {
             return (string) $smtp->host;
         }
 
@@ -372,7 +372,7 @@ class ProcessBulkMailerCampaign implements ShouldQueue
         $this->syncLiveCampaignCounts(
             $campaign,
             $hasPending ? BulkMailerCampaignStatus::Paused : BulkMailerCampaignStatus::Completed,
-            ! $hasPending
+            !$hasPending
         );
     }
 
@@ -415,9 +415,30 @@ class ProcessBulkMailerCampaign implements ShouldQueue
         return mb_strtolower(trim((string) $email));
     }
 
+    protected function normalizeHost(?string $host): string
+    {
+        $host = mb_strtolower(trim((string) $host));
+        $host = preg_replace('#^https?://#i', '', $host);
+        $host = trim($host, "/ \t\n\r\0\x0B");
+
+        return $host;
+    }
+
+    protected function mapEncryption(?string $encryption): ?string
+    {
+        $encryption = mb_strtolower(trim((string) $encryption));
+
+        return match ($encryption) {
+            '', 'none' => null,
+            'starttls' => 'tls',
+            'ssl', 'ssl/tls' => 'ssl',
+            default => $encryption,
+        };
+    }
+
     protected function isValidEmail(?string $email): bool
     {
-        if (! filled($email)) {
+        if (!filled($email)) {
             return false;
         }
 

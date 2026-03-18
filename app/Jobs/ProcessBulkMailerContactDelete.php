@@ -18,6 +18,8 @@ class ProcessBulkMailerContactDelete implements ShouldQueue
 
     public int $timeout = 3600;
 
+    protected int $chunkSize = 1000;
+
     public function __construct(public int $deleteJobId)
     {
     }
@@ -26,13 +28,14 @@ class ProcessBulkMailerContactDelete implements ShouldQueue
     {
         $deleteJob = BulkMailerContactDeleteJob::find($this->deleteJobId);
 
-        if (! $deleteJob) {
+        if (!$deleteJob) {
             return;
         }
 
         $deleteJob->update([
             'status' => 'processing',
             'error_message' => null,
+            'completed_at' => null,
         ]);
 
         try {
@@ -60,7 +63,7 @@ class ProcessBulkMailerContactDelete implements ShouldQueue
 
             do {
                 $ids = (clone $query)
-                    ->limit(1000)
+                    ->limit($this->chunkSize)
                     ->pluck('id');
 
                 $batchCount = $ids->count();
@@ -104,19 +107,19 @@ class ProcessBulkMailerContactDelete implements ShouldQueue
 
         $query = BulkMailerContact::query();
 
-        if (! empty($filters['search'])) {
+        if (!empty($filters['search'])) {
             $search = trim((string) $filters['search']);
 
             $query->where('email', 'like', '%' . $search . '%');
         }
 
-        if (! empty($filters['list_id']) && $filters['list_id'] !== 'all') {
+        if (!empty($filters['list_id']) && $filters['list_id'] !== 'all') {
             $query->where('bulk_mailer_contact_list_id', (int) $filters['list_id']);
         }
 
-        if ($deleteJob->selection_type === 'selected' && ! empty($filters['ids']) && is_array($filters['ids'])) {
+        if ($deleteJob->selection_type === 'selected' && !empty($filters['ids']) && is_array($filters['ids'])) {
             $ids = collect($filters['ids'])
-                ->map(fn ($id) => (int) $id)
+                ->map(fn($id) => (int) $id)
                 ->filter()
                 ->unique()
                 ->values()

@@ -103,7 +103,7 @@ class Index extends Component
         $this->bulk_mailer_template_id = (string) ($campaign->bulk_mailer_template_id ?? '');
         $this->bulk_mailer_segment_id = (string) ($campaign->bulk_mailer_segment_id ?? '');
         $this->bulk_mailer_smtp_group_id = (string) ($campaign->bulk_mailer_smtp_group_id ?? '');
-        $this->selected_lists = $campaign->lists->pluck('id')->map(fn ($id) => (string) $id)->all();
+        $this->selected_lists = $campaign->lists->pluck('id')->map(fn($id) => (string) $id)->all();
         $this->listSearch = '';
 
         $this->resetValidation();
@@ -233,7 +233,7 @@ class Index extends Component
 
         $campaign = BulkMailerCampaign::with(['template', 'smtpGroup.smtpAccounts'])->findOrFail($this->testId);
 
-        if (! $campaign->template) {
+        if (!$campaign->template) {
             $this->addError('test_email', 'This campaign has no template.');
 
             return;
@@ -241,7 +241,7 @@ class Index extends Component
 
         $smtp = $rotationService->resolveForCampaign($campaign);
 
-        if (! $smtp) {
+        if (!$smtp) {
             $this->addError('test_email', 'No available SMTP account was found for this campaign.');
 
             return;
@@ -279,7 +279,7 @@ class Index extends Component
                 ? strtr($textSource, $sampleData)
                 : '';
 
-            if (! filled($htmlBody) && filled($textBody)) {
+            if (!filled($htmlBody) && filled($textBody)) {
                 $htmlBody = nl2br(e($textBody));
             }
 
@@ -319,19 +319,19 @@ class Index extends Component
     {
         $campaign = BulkMailerCampaign::with(['template', 'lists', 'smtpGroup.smtpAccounts'])->findOrFail($id);
 
-        if (! $campaign->template) {
+        if (!$campaign->template) {
             session()->flash('error', 'Campaign must have a template before launch.');
 
             return;
         }
 
-        if (! $campaign->bulk_mailer_smtp_group_id) {
+        if (!$campaign->bulk_mailer_smtp_group_id) {
             session()->flash('error', 'Campaign must have an SMTP group before launch.');
 
             return;
         }
 
-        if (! $rotationService->resolveForCampaign($campaign)) {
+        if (!$rotationService->resolveForCampaign($campaign)) {
             session()->flash('error', 'No available SMTP account was found in the selected group.');
 
             return;
@@ -502,7 +502,7 @@ class Index extends Component
     {
         $query = BulkMailerContact::query();
 
-        if (! empty($listIds)) {
+        if (!empty($listIds)) {
             $query->whereIn('bulk_mailer_contact_list_id', array_map('intval', $listIds));
         }
 
@@ -524,9 +524,9 @@ class Index extends Component
     {
         Config::set('mail.mailers.bulk_mailer_campaign_test', [
             'transport' => 'smtp',
-            'host' => $smtp->host,
+            'host' => $this->normalizeHost($smtp->host),
             'port' => $smtp->port,
-            'encryption' => blank($smtp->encryption) ? null : $smtp->encryption,
+            'encryption' => $this->mapEncryption($smtp->encryption),
             'username' => $smtp->username,
             'password' => $smtp->decrypted_password,
             'timeout' => 90,
@@ -538,21 +538,42 @@ class Index extends Component
     {
         $configuredEhloDomain = (string) config('mail.ehlo_domain');
 
-        if (filled($configuredEhloDomain) && ! $this->isLocalhostHost($configuredEhloDomain)) {
+        if (filled($configuredEhloDomain) && !$this->isLocalhostHost($configuredEhloDomain)) {
             return $configuredEhloDomain;
         }
 
         $appHost = (string) parse_url((string) config('app.url'), PHP_URL_HOST);
 
-        if (filled($appHost) && ! $this->isLocalhostHost($appHost)) {
+        if (filled($appHost) && !$this->isLocalhostHost($appHost)) {
             return $appHost;
         }
 
-        if ($smtp && filled($smtp->host) && ! $this->isLocalhostHost((string) $smtp->host)) {
+        if ($smtp && filled($smtp->host) && !$this->isLocalhostHost((string) $smtp->host)) {
             return (string) $smtp->host;
         }
 
         return 'mail.example.com';
+    }
+
+    protected function normalizeHost(?string $host): string
+    {
+        $host = mb_strtolower(trim((string) $host));
+        $host = preg_replace('#^https?://#i', '', $host);
+        $host = trim($host, "/ \t\n\r\0\x0B");
+
+        return $host;
+    }
+
+    protected function mapEncryption(?string $encryption): ?string
+    {
+        $encryption = mb_strtolower(trim((string) $encryption));
+
+        return match ($encryption) {
+            '', 'none' => null,
+            'starttls' => 'tls',
+            'ssl', 'ssl/tls' => 'ssl',
+            default => $encryption,
+        };
     }
 
     protected function isLocalhostHost(string $host): bool
@@ -574,7 +595,7 @@ class Index extends Component
     public function getShouldPollProperty(): bool
     {
         return BulkMailerCampaign::query()
-            ->when($this->statusFilter !== 'all', fn ($query) => $query->where('status', $this->statusFilter))
+            ->when($this->statusFilter !== 'all', fn($query) => $query->where('status', $this->statusFilter))
             ->whereIn('status', [
                 BulkMailerCampaignStatus::Processing->value,
                 BulkMailerCampaignStatus::Scheduled->value,
@@ -600,7 +621,7 @@ class Index extends Component
                         ->orWhere('subject_b', 'like', '%' . $this->search . '%');
                 });
             })
-            ->when($this->statusFilter !== 'all', fn ($query) => $query->where('status', $this->statusFilter))
+            ->when($this->statusFilter !== 'all', fn($query) => $query->where('status', $this->statusFilter))
             ->latest()
             ->paginate(10);
     }

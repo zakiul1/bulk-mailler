@@ -53,6 +53,15 @@ class BulkMailerSmtpAccount extends Model
         'password',
     ];
 
+    public function setHostAttribute(?string $value): void
+    {
+        $host = mb_strtolower(trim((string) $value));
+        $host = preg_replace('#^https?://#i', '', $host);
+        $host = trim($host, "/ \t\n\r\0\x0B");
+
+        $this->attributes['host'] = blank($host) ? null : $host;
+    }
+
     public function setPasswordAttribute(?string $value): void
     {
         $this->attributes['password'] = blank($value) ? null : Crypt::encryptString($value);
@@ -120,7 +129,7 @@ class BulkMailerSmtpAccount extends Model
             return 'auto_disabled';
         }
 
-        if (! $this->is_active) {
+        if (!$this->is_active) {
             return 'inactive';
         }
 
@@ -133,7 +142,7 @@ class BulkMailerSmtpAccount extends Model
 
     public function isHealthyForSending(): bool
     {
-        if (! $this->is_active) {
+        if (!$this->is_active) {
             return false;
         }
 
